@@ -1,0 +1,7 @@
+name: M4_Hourly
+source: Merlion
+# Merlion has built-in loaders for M4, define the series ID to load
+series_id: "D1"
+granularity: "D"
+target_column: "value"
+test_split_ratio: 0.2

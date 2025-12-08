@@ -1,0 +1,4 @@
+class_path: merlion.models.forecast.arima.Arima
+name: ARIMA
+params:
+  max_forecast_steps: 100

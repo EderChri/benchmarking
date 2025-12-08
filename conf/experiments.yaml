@@ -1,0 +1,19 @@
+# conf/experiments.yaml
+
+# Define all the individual benchmark runs here
+runs:
+
+  # --- Experiment 1: Simple ARIMA on M4 Hourly ---
+  - name: "ARIMA_M4_Hourly_Baseline"
+    task: "forecasting"
+    data: "m4_hourly"      # References conf/data/m4_hourly.yaml
+    model: "arima"         # References conf/models/arima.yaml
+    preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
+    metrics: ["rmse", "smape"]
+
+  # # --- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
+  # - name: "DF_M4_Lagged"
+  #   data: "m4_daily"       # References conf/data/m4_daily.yaml (New file)
+  #   model: "default_forecaster"
+  #   preprocessor: "lag_features"
+  #   metrics: ["rmse"]

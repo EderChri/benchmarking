@@ -1,0 +1,24 @@
+# pyproject.toml
+
+[project]
+name = "merlion-benchmarking"
+version = "0.1.0"
+description = "A flexible benchmarking framework for Merlion time series models."
+readme = "ReadMe.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Christoph Eder", email = "christoph.eder@ntnu.no"}
+]
+requires-python = ">=3.10"
+
+dependencies = [
+    "salesforce-merlion>=2.0.4",
+    "scikit-learn>=1.4",
+    "pyyaml>=6.0",
+    "pandas>=2.0.0",
+    "numpy>=1.26.0"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

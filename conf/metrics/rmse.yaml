@@ -1,0 +1,2 @@
+name: rmse
+class: merlion.utils.metrics.rmse
