@@ -1,0 +1,10 @@
+name: MultiStep
+source: merlion
+transforms:
+  - module: moving_average
+    class: DifferenceTransform
+    params:
+      k: 1
+  - module: normalize
+    class: MeanVarNormalize
+    params: {}

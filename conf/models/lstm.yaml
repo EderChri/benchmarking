@@ -1,0 +1,9 @@
+name: CustomLSTM
+source: custom
+module: models.lstm
+class: LSTMForecaster
+config_class: LSTMForecasterConfig
+params:
+  max_forecast_steps: 100
+  hidden_size: 128
+  num_layers: 2

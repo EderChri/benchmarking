@@ -6,7 +6,7 @@ runs:
   # --- Experiment 1: Simple ARIMA on M4 Hourly ---
   - name: "ARIMA_M4_Hourly_Baseline"
     task: "forecasting"
-    data: "m4_hourly"      # References conf/data/m4_hourly.yaml
+    data: "m4_daily"      # References conf/data/m4_hourly.yaml
     model: "arima"         # References conf/models/arima.yaml
     preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
     metrics: ["rmse", "smape"]

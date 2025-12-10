@@ -1,0 +1,7 @@
+name: Custom
+source: custom
+module: loaders.custom_dataset_loader
+class: CustomDatasetLoader
+params:
+  filepath: "/path/to/data.csv"
+test_split_ratio: 0.2

@@ -1,2 +1,5 @@
 name: NoPreProcessing
-pipeline: [] # no transformations
+source: merlion
+module: base
+class: Identity
+params: {}

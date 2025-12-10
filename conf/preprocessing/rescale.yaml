@@ -1,0 +1,7 @@
+name: Rescale
+source: merlion
+module: normalize
+class: Rescale
+params:
+  bias: 0.0
+  scale: 1.0
