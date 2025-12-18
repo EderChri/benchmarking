@@ -1,5 +1,5 @@
-name: RMSE
+name: sMAPE
 source: merlion
 module: forecast
 class: ForecastMetric
-metric_name: RMSE
+metric_name: sMAPE

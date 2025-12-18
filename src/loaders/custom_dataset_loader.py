@@ -1,23 +1,17 @@
-from ts_datasets.base import BaseDataset
-from merlion.utils.time_series import TimeSeries
+from loaders.base_loader import BaseDataLoader, register_loader
+from merlion.utils import TimeSeries
 import pandas as pd
 
-class CustomDatasetLoader(BaseDataset):
-    def __init__(self, filepath, test_split=0.2):
-        self.filepath = filepath
-        self.test_split = test_split
-        self._load_data()
-    
-    def _load_data(self):
-        df = pd.read_csv(self.filepath, index_col=0, parse_dates=True)
-        split_idx = int(len(df) * (1 - self.test_split))
-        df['trainval'] = df.index < df.index[split_idx]
+@register_loader("custom")
+@register_loader("csv")  # Can register multiple sources
+class CustomDatasetLoader(BaseDataLoader):
+    def load(self):
+        df = pd.read_csv(self.config['file_path'])
+        df[self.config.get('time_column', 'timestamp')] = pd.to_datetime(df[self.config.get('time_column', 'timestamp')])
+        df = df.set_index(self.config.get('time_column', 'timestamp'))[[self.config.get('target_column', 'value')]]
         
-        self.time_series = [df]
-        self.metadata = [pd.DataFrame({'trainval': df['trainval']})]
-    
-    def __len__(self):
-        return len(self.time_series)
-    
-    def __getitem__(self, i):
-        return self.time_series[i], self.metadata[i]
+        split_idx = int(len(df) * (1 - self.test_split_ratio))
+        train_data = TimeSeries.from_pd(df.iloc[:split_idx])
+        test_data = TimeSeries.from_pd(df.iloc[split_idx:])
+        
+        return train_data, test_data

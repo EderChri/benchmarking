@@ -1,8 +1,7 @@
-name: M4_Daily
+name: M4_Hourly
 source: merlion
 module: forecast
 class: M4
-series_id: 0  
-granularity: Daily
+granularity: Hourly
 target_column: value
 test_split_ratio: 0.2

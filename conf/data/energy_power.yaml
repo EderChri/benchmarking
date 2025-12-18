@@ -1,0 +1,7 @@
+name: EnergyPower
+source: merlion
+module: forecast
+class: EnergyPower
+rootdir: "data/multivariate/EnergyPower/"
+target_column: value
+test_split_ratio: 0.2

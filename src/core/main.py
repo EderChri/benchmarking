@@ -15,7 +15,8 @@ import warnings
 import torch
 import random
 import numpy as np 
-from loaders.dataset_loader import DatasetLoader
+from loaders import LOADER_REGISTRY
+import loaders # Ensure loaders are registered
 
 # Suppress specific deprecation warnings from merlion datasets
 warnings.filterwarnings('ignore', message="'H' is deprecated")
@@ -53,64 +54,68 @@ class BenchmarkRunner:
         return self.load_yaml(config_path)
     
     def instantiate(self, config: Dict[str, Any], component_type: str):
-        source = config.get('source', 'default')
-        module_name = config.get('module')
-        class_name = config.get('class')
-        class_path = config.get('class_path')  # Support direct class path
-        params = config.get('params', {})
+        handlers = {
+            'metrics': self._instantiate_metric,
+            'models': self._instantiate_model,
+            'preprocessing': self._instantiate_preprocessing,
+        }
+        
+        handler = handlers.get(component_type)
+        if handler:
+            return handler(config)
+        
+        raise ValueError(f"Unknown component_type: {component_type}")
 
-        if component_type == "data":
-            series_id = config.get('series_id')
-            granularity = config.get('granularity')
-            if series_id:
-                params['series_id'] = series_id
-            if granularity:
-                params['subset'] = granularity  # M4 uses 'subset' parameter
+    def _instantiate_metric(self, config: Dict[str, Any]):
+        if config.get('class_path'):
+            return self._import_from_path(config['class_path'])
         
-        # Handle class_path for metrics (e.g., merlion.evaluate.forecast.smape)
-        if class_path:
-            parts = class_path.rsplit('.', 1)
-            module_path = parts[0]
-            class_name = parts[1]
-            module = importlib.import_module(module_path)
+        source = config.get('source', 'default')
+        if source == 'merlion':
+            module = importlib.import_module(f"merlion.evaluate.{config['module']}")
+            metric_enum = getattr(module, config['class'])
+            return getattr(metric_enum, config['metric_name'])
         else:
-            # Define module path mapping
-            module_paths = {
-                ('data', 'merlion'): f"ts_datasets.{module_name}",
-                ('data', 'default'): module_name,
-                ('preprocessing', 'merlion'): f"merlion.transform.{module_name}",
-                ('preprocessing', 'default'): f"preprocessing.{module_name}",
-                ('models', 'merlion'): f"merlion.models.{module_name}",
-                ('models', 'default'): module_name,
-                ('metrics', 'merlion'): f"merlion.evaluate.{module_name}",
-                ('metrics', 'default'): f"metrics.{module_name}",
-            }
-            
-            module_path = module_paths.get((component_type, source))
-            if not module_path:
-                raise ValueError(f"Unknown component_type '{component_type}' or source '{source}'")
-            
-            module = importlib.import_module(module_path)
+            module = importlib.import_module(f"metrics.{config['module']}")
+            cls = getattr(module, config['class'])
+            return cls(**config.get('params', {}))
+
+    def _instantiate_model(self, config: Dict[str, Any]):
+        source = config.get('source', 'default')
+        module_path = f"merlion.models.{config['module']}" if source == 'merlion' else config['module']
+        module = importlib.import_module(module_path)
         
-        # Special handling for models
-        if component_type == "models":
-            config_class_name = config.get('config_class')
-            config_cls = getattr(module, config_class_name)
-            model_config = config_cls(**params)
-            model_cls = getattr(module, class_name)
-            return model_cls(model_config)
+        config_cls = getattr(module, config['config_class'])
+        model_config = config_cls(**config.get('params', {}))
         
-        # Standard instantiation
-        cls = getattr(module, class_name)
-        return cls(**params) if params else cls
+        model_cls = getattr(module, config['class'])
+        return model_cls(model_config)
+
+    def _instantiate_preprocessing(self, config: Dict[str, Any]):
+        source = config.get('source', 'default')
+        module_path = f"merlion.transform.{config['module']}" if source == 'merlion' else f"preprocessing.{config['module']}"
+        module = importlib.import_module(module_path)
+        
+        cls = getattr(module, config['class'])
+        return cls(**config.get('params', {}))
+
+    def _import_from_path(self, class_path: str):
+        parts = class_path.rsplit('.', 1)
+        module = importlib.import_module(parts[0])
+        return getattr(module, parts[1])
 
 
 
 
     def load_dataset(self, data_config: Dict[str, Any]):
-        base_dataset = self.instantiate(data_config, "data")
-        test_split_ratio = data_config.get('test_split_ratio', 0.2)
-        return DatasetLoader(base_dataset, test_split_ratio)
+        
+        source = data_config.get('source', 'custom')
+        loader_cls = LOADER_REGISTRY[source]
+        return loader_cls(data_config, data_config.get('test_split_ratio', 0.2))
+
+    def load_model(self, model_cfg: Dict[str, Any]):
+        return self.instantiate(model_cfg, 'models') 
+
 
     
     def load_preprocessor(self, preproc_config: Dict[str, Any]):
@@ -143,7 +148,7 @@ class BenchmarkRunner:
             data_loader = self.load_dataset(data_cfg)
             train_data, test_data = data_loader.load()
             
-            transformation = self.instantiate(preproc_cfg, 'preprocessing')
+            transformation = self.load_preprocessor(preproc_cfg)
             transformation.train(train_data)
             train_data = transformation(train_data)
             test_data = transformation(test_data)
@@ -153,25 +158,23 @@ class BenchmarkRunner:
             
             predictions = self.execute_task(run['task'], model, test_data)
             
-        # Evaluate metrics
-        results = {}
-        for metric_name in metric_names:
-            metric_cfg = self.get_component_by_name(metric_name, 'metrics')
-            metric_fn = self.instantiate(metric_cfg, 'metrics')
-            
-            # Handle both function-style (ForecastMetric enum) and class-based metrics
-            if callable(metric_fn):
+            # Evaluate metrics
+            results = {}
+            for metric_name in metric_names:
+                metric_cfg = self.get_component_by_name(metric_name, 'metrics')
+                metric_fn = self.instantiate(metric_cfg, 'metrics')
+                
+                # All Merlion metrics (ForecastMetric/TSADMetric) have .value attribute
                 if hasattr(metric_fn, 'value'):
-                    # Merlion ForecastMetric enum style
                     score = metric_fn.value(ground_truth=test_data, predict=predictions)
                 else:
-                    # Custom metric class with evaluate method
-                    score = metric_fn.evaluate(test_data, predictions)
-            else:
-                raise ValueError(f"Metric {metric_name} is not callable")
-            
-            results[metric_name] = score
-            print(f"{metric_name.upper()}: {score:.4f}")
+                    # Custom metric inheriting from MetricBase
+                    score = metric_fn(ground_truth=test_data, predict=predictions)
+                
+                results[metric_name] = float(score) 
+                print(f"{metric_name.upper()}: {score:.4f}")
+
+
         
         self.save_results(run['name'], results)
 
@@ -192,18 +195,34 @@ class BenchmarkRunner:
 
     def _execute_forecasting(self, model, test_data):
         """Execute forecasting task."""
-        return model.forecast(time_stamps=test_data.time_stamps)
+        forecast_result = model.forecast(time_stamps=test_data.time_stamps)
+        
+        if isinstance(forecast_result, tuple):
+            return forecast_result[0] 
+        return forecast_result
 
     def _execute_anomaly_detection(self, model, test_data):
         """Execute anomaly detection task."""
         return model.get_anomaly_score(test_data)
-    
+        
     def save_results(self, exp_name: str, results: Dict[str, float]):
+        from datetime import datetime
+        
         results_dir = Path("results")
         results_dir.mkdir(exist_ok=True)
         
-        with open(results_dir / "experiments.yaml", 'a') as f:
-            yaml.dump([{"experiment": exp_name, "results": results}], f)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = results_dir / f"{timestamp}_experiments.yaml"
+        
+        result = {
+            "experiment": exp_name,
+            "timestamp": timestamp,
+            "results": results
+        }
+        
+        with open(result_file, 'w') as f:
+            yaml.dump(result, f, default_flow_style=False)
+
 
     
     def is_compatible(self, task_cfg, model_cfg, metric_cfg) -> bool:
@@ -227,25 +246,6 @@ class BenchmarkRunner:
             return model.forecast(len(test_data))
         else:
             raise ValueError(f"Unknown task: {task_type}")
-    
-    def save_results(self, task_cfg, data_cfg, preproc_cfg, model_cfg, metric_cfg, score):
-        """Save experiment results"""
-        results_dir = Path("results")
-        results_dir.mkdir(exist_ok=True)
-        
-        result_file = results_dir / "experiments.yaml"
-        result = {
-            "task": task_cfg['name'],
-            "dataset": data_cfg['name'],
-            "preprocessing": preproc_cfg['name'],
-            "model": model_cfg['name'],
-            "metric": metric_cfg['name'],
-            "score": float(score)
-        }
-        
-        with open(result_file, 'a') as f:
-            yaml.dump([result], f)
-
 
 if __name__ == "__main__":
     print("Working dir:", os.getcwd())
