@@ -1,0 +1,5 @@
+name: SeattleTrail
+source: merlion
+module: anomaly
+class: SeattleTrail
+series_id: 0

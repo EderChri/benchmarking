@@ -1,0 +1,5 @@
+name: SMD
+source: merlion
+module: anomaly
+class: SMD
+subset: machine-1-1

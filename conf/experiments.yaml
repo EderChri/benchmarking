@@ -3,13 +3,13 @@
 # Define all the individual benchmark runs here
 runs:
 
-  # --- Experiment 1: Simple ARIMA on M4 Daily ---
-  - name: "ARIMA_M4_Daily_Baseline"
-    task: "forecasting"
-    data: "m4_daily"      # References conf/data/m4_daily.yaml
-    model: "arima"         # References conf/models/arima.yaml
-    preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
-    metrics: ["rmse", "smape"]
+  # # --- Experiment 1: Simple ARIMA on M4 Daily ---
+  # - name: "ARIMA_M4_Daily_Baseline"
+  #   task: "forecasting"
+  #   data: "m4_daily"      # References conf/data/m4_daily.yaml
+  #   model: "arima"         # References conf/models/arima.yaml
+  #   preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
+  #   metrics: ["rmse", "smape", "mae"]
 
   #   # --- Experiment 2: Simple ARIMA on M4 Hourly ---
   # - name: "ARIMA_M4_Hourly_Baseline"
@@ -17,19 +17,20 @@ runs:
   #   data: "m4_hourly"      # References conf/data/m4_hourly.yaml
   #   model: "arima"         # References conf/models/arima.yaml
   #   preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
-  #   metrics: ["rmse", "smape"]
+  #   metrics: ["rmse", "smape", "mae"]
   
-  #   # --- Experiment 3: Simple ARIMA on EnergyPower ---
+    # --- Experiment 3: Simple ARIMA on EnergyPower ---
   # - name: "ARIMA_EnergyPower_Baseline"
   #   task: "forecasting"
   #   data: "energy_power"      # References conf/data/energy_power.yaml
   #   model: "arima"         # References conf/models/arima.yaml
   #   preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
-  #   metrics: ["rmse", "smape"]
+  #   metrics: ["rmse", "smape", "mae"]
 
-  # # --- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
-  # - name: "DF_M4_Lagged"
-  #   data: "m4_daily"       # References conf/data/m4_daily.yaml (New file)
-  #   model: "default_forecaster"
-  #   preprocessor: "lag_features"
-  #   metrics: ["rmse"]
+  # --- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
+  - name: "DF_M4_MovingAverage"
+    task: "forecasting"
+    data: "m4_daily"       # References conf/data/m4_daily.yaml (New file)
+    model: "prophet"
+    preprocessor: "moving_average"
+    metrics: ["rmse", "smape", "mae"]

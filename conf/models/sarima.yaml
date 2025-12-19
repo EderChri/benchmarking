@@ -1,0 +1,13 @@
+name: SARIMA
+source: merlion
+module: forecast.sarima
+class: Sarima
+config_class: SarimaConfig
+params:
+  max_forecast_steps: 100
+  d: 1
+  D: 1
+  p: 1
+  q: 1
+  P: 1
+  Q: 1

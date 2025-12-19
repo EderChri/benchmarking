@@ -1,0 +1,5 @@
+name: NAB
+source: merlion
+module: anomaly
+class: NAB
+subset: realAWSCloudwatch

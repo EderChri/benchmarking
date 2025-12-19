@@ -1,0 +1,7 @@
+name: Prophet
+source: merlion
+module: forecast.prophet
+class: Prophet
+config_class: ProphetConfig
+params:
+  max_forecast_steps: 100

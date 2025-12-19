@@ -1,0 +1,5 @@
+name: MAE
+source: merlion
+module: forecast
+class: ForecastMetric
+metric_name: MAE

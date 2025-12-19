@@ -1,0 +1,5 @@
+name: Normalization
+source: merlion
+module: transform
+class: Normalize
+params: {}

@@ -1,0 +1,6 @@
+name: MovingAverage
+source: merlion
+module: moving_average
+class: MovingAverage
+params:
+  weights: [1,1,1]
