@@ -1,3 +1,5 @@
+import trace
+import traceback
 import test
 import yaml
 import importlib
@@ -7,6 +9,7 @@ from typing import Dict, Any
 from itertools import product
 import os
 import sys
+from merlion.utils.resample import AggregationPolicy
 from merlion.utils import TimeSeries
 from merlion.models.base import ModelBase
 from merlion.transform.base import TransformBase
@@ -16,9 +19,11 @@ import warnings
 import torch
 import random
 import numpy as np
+from zmq import has
 from loaders import LOADER_REGISTRY
 from datetime import datetime
 import time
+
 import loaders  # Ensure loaders are registered
 
 # Suppress specific deprecation warnings from merlion datasets
@@ -87,6 +92,7 @@ class BenchmarkRunner:
 
     def _instantiate_model(self, config: Dict[str, Any]):
         source = config.get('source', 'default')
+        
         module_path = f"merlion.models.{config['module']}" if source == 'merlion' else config['module']
         module = importlib.import_module(module_path)
 
@@ -145,37 +151,78 @@ class BenchmarkRunner:
                 # Load component configs
                 data_cfg = self.get_component_by_name(run['data'], 'data')
                 model_cfg = self.get_component_by_name(run['model'], 'models')
+                target_seq_index = run.get('target', None)
+                if target_seq_index is not None:
+                    model_cfg['params']['target_seq_index'] = target_seq_index
                 preproc_cfg = self.get_component_by_name(
                     run['preprocessor'], 'preprocessing')
                 metric_names = run['metrics']
-
+                
                 # Instantiate and run
                 data_loader = self.load_dataset(data_cfg)
-                train_data, test_data = data_loader.load()
+                data_splits = data_loader.load()
+                
+                # Handle both supervised and unsupervised cases
+                if isinstance(data_splits[0], tuple):  # Supervised
+                    (train_data, train_labels), (test_data, test_labels) = data_splits[:2]
+                    has_labels = True
+                    val_data, val_labels = data_splits[2] if len(data_splits) == 3 else (None, None)
+                else:  # Unsupervised
+                    if len(data_splits) == 3:
+                        train_data, val_data, test_data = data_splits
+                    else:
+                        train_data, test_data = data_splits
+                        val_data = None
+                    train_labels = test_labels = val_labels = None
+                    has_labels = False
+                if val_data is not None:
+                    has_validation = True
+                else:
+                    has_validation = False
 
+
+                # Apply preprocessing
                 transformation = self.load_preprocessor(preproc_cfg)
                 transformation.train(train_data)
                 train_data = transformation(train_data)
+                if has_validation:
+                    val_data = transformation(val_data) ## TODO: Not used at all currently
                 test_data = transformation(test_data)
 
+                # Train model
                 model = self.instantiate(model_cfg, 'models')
-                model.train(train_data)
+                if run['task'] in ['anomaly_detection', 'anomaly']:
+                    model.train(train_data, anomaly_labels=train_labels)
+                else:
+                    model.train(train_data)
+                
+                # Generate predictions
                 predictions = self.execute_task(run['task'], model, test_data)
 
                 # Evaluate metrics
                 results = {}
                 for metric_name in metric_names:
-                    metric_cfg = self.get_component_by_name(
-                        metric_name, 'metrics')
+                    metric_cfg = self.get_component_by_name(metric_name, 'metrics')
                     metric_fn = self.instantiate(metric_cfg, 'metrics')
-
-                    if hasattr(metric_fn, 'value'):
-                        score = metric_fn.value(
-                            ground_truth=test_data, predict=predictions)
-                    else:
-                        score = metric_fn(
-                            ground_truth=test_data, predict=predictions)
-
+                    
+                    # Anomaly detection: use labels as ground truth
+                    if run['task'] in ['anomaly_detection', 'anomaly']:
+                        if has_labels:
+                            if hasattr(metric_fn, 'value'):
+                                score = metric_fn.value(ground_truth=test_labels, predict=predictions)
+                            else:
+                                score = metric_fn(ground_truth=test_labels, predict=predictions)
+                        else:
+                            print(f"Skipping {metric_name} (no labels available for anomaly detection)")
+                            continue
+                    
+                    # Other: use actual time series as ground truth
+                    else: 
+                        if hasattr(metric_fn, 'value'):
+                            score = metric_fn.value(ground_truth=test_data, predict=predictions)
+                        else:
+                            score = metric_fn(ground_truth=test_data, predict=predictions)
+                    
                     results[metric_name] = float(score)
                     print(f"{metric_name.upper()}: {score:.4f}")
                     
@@ -190,6 +237,7 @@ class BenchmarkRunner:
             except Exception as e:
                 runtime = time.time() - start_time
                 print(f"ERROR: {run['name']} failed with {str(e)}")
+                traceback.print_exc()
                 run_result = self.save_run_results(
                     run['name'], {}, status="failed", error=str(e), runtime=runtime)
                 all_results.append(run_result)

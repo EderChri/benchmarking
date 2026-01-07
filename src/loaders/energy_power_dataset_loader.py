@@ -8,7 +8,6 @@ class EnergyPowerDatasetLoader(BaseDataLoader):
     def load(self):
         file_path = self.config.get('file_path')
         target_column = self.config.get('target_column', 'Global_active_power')
-        test_split_ratio = self.config.get('test_split_ratio', 0.2)
         
         df = pd.read_csv(file_path, na_values='?')
         
@@ -24,9 +23,10 @@ class EnergyPowerDatasetLoader(BaseDataLoader):
         if self.test_mode:
             df = df.head(100)
         
-        # Split train/test
-        split_idx = int(len(df) * (1 - test_split_ratio))
-        train_data = TimeSeries.from_pd(df.iloc[:split_idx])
-        test_data = TimeSeries.from_pd(df.iloc[split_idx:])
+        train_split_idx = int(len(df) * (1 - self.test_split_ratio - self.validation_split_ratio))
+        test_split_idx = int(len(df) * (1 - self.test_split_ratio))
+        train_data = TimeSeries.from_pd(df.iloc[:train_split_idx])
+        val_data = TimeSeries.from_pd(df.iloc[train_split_idx:test_split_idx])
+        test_data = TimeSeries.from_pd(df.iloc[test_split_idx:])
         
-        return train_data, test_data
+        return train_data, val_data, test_data

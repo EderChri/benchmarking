@@ -1,5 +1,5 @@
 name: EnergyPower
 source: energy_power
-file_path: "src/data/multivariate/energy_power/household_power_consumption.csv.gz"
+file_path: "src/data/energy_power/household_power_consumption.csv.gz"
 target_column: Global_active_power
 test_split_ratio: 0.2

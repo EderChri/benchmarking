@@ -1,0 +1,5 @@
+name: ETTm2
+source: single_csv
+file_path: "src/data/ETT-small/ETTm2.csv"
+index_column: date
+test_split_ratio: 0.2

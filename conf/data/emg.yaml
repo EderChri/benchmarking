@@ -1,0 +1,4 @@
+name: EMG
+source: torch_dataset
+dataset_dir: "src/data/EMG"
+has_labels: true

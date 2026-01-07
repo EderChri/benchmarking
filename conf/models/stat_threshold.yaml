@@ -1,0 +1,7 @@
+name: StatThreshold
+source: merlion
+module: anomaly.stat_threshold
+class: StatThreshold
+config_class: StatThresholdConfig
+params:
+  placeholder: true

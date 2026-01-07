@@ -1,0 +1,4 @@
+name: ECG
+source: torch_dataset
+dataset_dir: "src/data/ECG"
+has_labels: true

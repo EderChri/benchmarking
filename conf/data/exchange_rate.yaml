@@ -1,0 +1,5 @@
+name: Exchange_rate
+source: single_csv
+file_path: "src/data/exchange_rate/exchange_rate.csv"
+index_column: date
+test_split_ratio: 0.2

@@ -28,9 +28,33 @@ runs:
   #   metrics: ["rmse", "smape", "mae"]
 
   # --- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
-  - name: "DF_M4_MovingAverage"
+  # - name: "DF_M4_MovingAverage"
+  #   task: "forecasting"
+  #   data: "m4_daily"       # References conf/data/m4_daily.yaml (New file)
+  #   model: "prophet"
+  #   preprocessor: "no_preproc"
+  #   metrics: ["rmse", "smape", "mae"]
+
+    # --- Test all datasets ---
+  - name: "Test_1 Electricity"
     task: "forecasting"
-    data: "m4_daily"       # References conf/data/m4_daily.yaml (New file)
-    model: "prophet"
-    preprocessor: "moving_average"
-    metrics: ["rmse", "smape", "mae"]
+    data: "electricity"
+    model: "arima"
+    preprocessor: "no_preproc"
+    metrics: ["rmse"]
+    # --- Test all datasets ---
+  - name: "Test_1 ECG"
+    task: "anomaly"
+    data: "ecg"
+    model: "stat_threshold"
+    target: 1
+    preprocessor: "no_preproc"
+    metrics: ["rmse"]
+    # --- Test all datasets ---
+  - name: "Test_1 EMG"
+    task: "anomaly"
+    data: "emg"
+    model: "stat_threshold"
+    target: 1
+    preprocessor: "no_preproc"
+    metrics: ["rmse"]

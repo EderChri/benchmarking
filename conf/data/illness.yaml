@@ -1,0 +1,5 @@
+name: Illness
+source: single_csv
+file_path: "src/data/illness/national_illness.csv"
+index_column: date
+test_split_ratio: 0.2

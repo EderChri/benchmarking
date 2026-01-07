@@ -8,3 +8,10 @@ external*
 results/
 *.csv
 *.gz
+.python-version
+.venv*
+src/data/*
+!src/data/*.sh
+!src/data/energy_power/
+src/data/energy_power/*
+!src/data/energy_power/download.py

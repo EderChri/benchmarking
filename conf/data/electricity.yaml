@@ -1,0 +1,6 @@
+name: Electricity
+source: single_csv
+file_path: "src/data/electricity/electricity.csv"
+index_column: date
+target_columns: "1"
+test_split_ratio: 0.2

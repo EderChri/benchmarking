@@ -1,0 +1,3 @@
+name: Gesture
+source: torch_dataset
+dataset_dir: "src/data/Gesture"

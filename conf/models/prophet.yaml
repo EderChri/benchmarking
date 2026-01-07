@@ -5,3 +5,4 @@ class: Prophet
 config_class: ProphetConfig
 params:
   max_forecast_steps: 100
+  exog_aggregation_policy: none
