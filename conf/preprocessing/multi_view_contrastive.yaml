@@ -1,0 +1,29 @@
+transforms:
+  - class: MeanVarNormalize
+    module: normalize
+    source: merlion
+    params: {}
+  
+  - class: HermiteCubicDerivativeTransform
+    module: hermite_cubic_derivative
+    source: custom
+    params:
+      numeric_only: true
+  
+  # Also normalise after derivative computation
+  - class: MeanVarNormalize
+    module: normalize
+    source: merlion
+    params: {}
+  
+  - class: FFTTransform
+    module: fft
+    source: custom
+    params:
+      numeric_only: true
+  
+  # Final normalization for FFT
+  - class: MeanVarNormalize
+    module: normalize
+    source: merlion
+    params: {}

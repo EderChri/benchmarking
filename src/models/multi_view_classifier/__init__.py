@@ -1,0 +1,2 @@
+from .config import MultiViewClassifierConfig
+from .multi_view_classifier import MultiViewClassifier

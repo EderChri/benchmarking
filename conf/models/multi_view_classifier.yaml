@@ -1,0 +1,38 @@
+name: MultiViewClassifier
+source: custom
+module: models.multi_view_classifier
+class: MultiViewClassifier
+config_class: MultiViewClassifierConfig
+params:
+  # Architecture (all from YAML now)
+  num_feature: 1
+  num_embedding: 128
+  num_hidden: 256
+  num_head: 8
+  num_layers: 2
+  num_target: 2
+  dropout: 0.1
+  
+  # Training
+  batch_size: 32
+  num_epochs: 50
+  lr: 0.001
+  weight_decay: 0.01
+  l1_scale: 0.0
+  l2_scale: 0.01
+  
+  # Loss
+  loss_type: 'ALL'  # 'ALL', 'TDF', 'TD', 'TF', 'DF', 'T', 'D', 'F'
+  feature: 'latent'  # 'latent' or 'hidden'
+  temperature: 0.5
+  lam: 0.1
+  
+  # Mode
+  mode: 'finetune'  # 'pretrain', 'finetune', 'freeze'
+  use_gpu: true
+  checkpoint_path: null
+  
+  # DetectorConfig params
+  max_score: 1.0
+  enable_calibrator: true
+  enable_threshold: true

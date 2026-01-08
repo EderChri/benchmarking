@@ -36,25 +36,10 @@ runs:
   #   metrics: ["rmse", "smape", "mae"]
 
     # --- Test all datasets ---
-  - name: "Test_1 Electricity"
-    task: "forecasting"
-    data: "electricity"
-    model: "arima"
-    preprocessor: "no_preproc"
-    metrics: ["rmse"]
-    # --- Test all datasets ---
   - name: "Test_1 ECG"
     task: "anomaly"
     data: "ecg"
-    model: "stat_threshold"
+    model: "multi_view_classifier"
     target: 1
-    preprocessor: "no_preproc"
-    metrics: ["rmse"]
-    # --- Test all datasets ---
-  - name: "Test_1 EMG"
-    task: "anomaly"
-    data: "emg"
-    model: "stat_threshold"
-    target: 1
-    preprocessor: "no_preproc"
+    preprocessor: "multi_view_contrastive"
     metrics: ["rmse"]
