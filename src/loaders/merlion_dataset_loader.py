@@ -33,9 +33,16 @@ class MerlionDatasetLoader(BaseDataLoader):
         if self.test_mode:
             time_series = time_series.iloc[:100]
             split_idx = len(time_series) // 2
-            train_mask = pd.Series([True] * split_idx + [False] * (len(time_series) - split_idx), 
-                                   index=time_series.index)
-            val_mask = pd.Series([False] * len(time_series), index=time_series.index)
+            trainval_mask = pd.Series([True] * split_idx + [False] * (len(time_series) - split_idx), 
+                               index=time_series.index)
+    
+            val_size = int(split_idx * self.validation_split_ratio)
+            train_size = split_idx - val_size
+            
+            train_mask = pd.Series([True] * train_size + [False] * (len(time_series) - train_size), 
+                                index=time_series.index)
+            val_mask = pd.Series([False] * train_size + [True] * val_size + [False] * (len(time_series) - split_idx),
+                                index=time_series.index)
         else:
             # Get train/test split from metadata
             trainval_mask = metadata.trainval.reindex(time_series.index).astype(bool)

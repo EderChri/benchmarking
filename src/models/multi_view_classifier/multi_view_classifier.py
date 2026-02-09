@@ -118,23 +118,24 @@ class MultiViewClassifier(DetectorBase):
         self.encoder.load_state_dict(state_dict, strict=False)
         print(f"Loaded pre-trained weights from {checkpoint_path}")
 
-    def _extract_domains(self, time_series: TimeSeries):
-        """Extract time, derivative, and frequency domains from TimeSeries"""
-        df = time_series.to_pd()
+    def _extract_domains(self, time_series: pd.DataFrame):
+        """Extract time, derivative, and frequency domains from dataframe"""
+        if type(time_series) != pd.DataFrame:
+            time_series = time_series.to_pd()
 
         # Identify columns by domain
         original_cols = [
             c
-            for c in df.columns
+            for c in time_series.columns
             if not c.endswith("_derivative") and not c.endswith("_fft")
         ]
-        derivative_cols = [c for c in df.columns if c.endswith("_derivative")]
-        fft_cols = [c for c in df.columns if c.endswith("_fft")]
+        derivative_cols = [c for c in time_series.columns if c.endswith("_derivative")]
+        fft_cols = [c for c in time_series.columns if c.endswith("_fft")]
 
         # Extract data for each domain
-        xt = df[original_cols].values if original_cols else np.zeros((len(df), 1))
-        dx = df[derivative_cols].values if derivative_cols else np.zeros_like(xt)
-        xf = df[fft_cols].values if fft_cols else np.zeros_like(xt)
+        xt = time_series[original_cols].values if original_cols else np.zeros((len(time_series), 1))
+        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(xt)
+        xf = time_series[fft_cols].values if fft_cols else np.zeros_like(xt)
 
         return xt, dx, xf
 
