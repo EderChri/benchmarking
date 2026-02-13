@@ -286,7 +286,8 @@ class BenchmarkRunner:
             val_labels,
             has_labels,
         ) = self._parse_data_splits(raw_data_splits)
-
+        print(f"Train data shape: {train_data.shape}")
+        print(f"Test data shape: {test_data.shape}")
         train_data, test_data, val_data = self._apply_transformations(
             configs["preprocessing"], train_data, test_data, val_data
         )

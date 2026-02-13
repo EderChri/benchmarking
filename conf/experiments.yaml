@@ -27,7 +27,7 @@ runs:
   #   preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
   #   metrics: ["rmse", "smape", "mae"]
 
-  # --- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
+  #--- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
   # - name: "DF_M4_MovingAverage"
   #   task: "forecasting"
   #   data: "m4_daily"       # References conf/data/m4_daily.yaml (New file)

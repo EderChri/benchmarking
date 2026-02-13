@@ -4,6 +4,7 @@ from merlion.utils import TimeSeries
 import torchcde
 import torch
 import numpy as np
+from utils.config import marker
 
 
 class HermiteCubicDerivativeTransform(TransformBase):
@@ -70,6 +71,8 @@ class HermiteCubicDerivativeTransform(TransformBase):
         numeric_cols_present = []
         
         for col in self._numeric_columns:
+            if marker in col:
+                continue
             if col in df.columns:
                 numeric_data.append(df[col].values)
                 numeric_cols_present.append(col)
@@ -84,7 +87,7 @@ class HermiteCubicDerivativeTransform(TransformBase):
         # Compute derivatives using Hermite cubic splines
         dx = self._compute_hermite_derivative(X)
         
-        derivative_cols = {f"{col}_derivative": dx[:, i] 
+        derivative_cols = {f"{col}{marker}derivative": dx[:, i] 
                           for i, col in enumerate(numeric_cols_present)}
         derivative_df = pd.DataFrame(derivative_cols, index=df.index)
         

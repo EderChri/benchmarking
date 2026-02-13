@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from merlion.transform.base import TransformBase
 from merlion.utils import TimeSeries
+from utils.config import marker
 
 
 class FFTTransform(TransformBase):
@@ -34,13 +35,18 @@ class FFTTransform(TransformBase):
         
         fft_dfs = []
         for col in self._numeric_columns:
-            if col not in df.columns:
+            if col not in df.columns or marker in col:
                 continue
             
-            # Compute FFT magnitude along sequence dimension
-            fft_values = np.abs(np.fft.fft(df[col].values))
-            fft_dfs.append(pd.DataFrame({f"{col}_fft": fft_values}, index=df.index))
-        
+            col_data = df[col].values
+
+            if col_data.ndim == 1:
+                fft_values = np.abs(np.fft.fft(col_data))
+            else:
+                fft_values = np.abs(np.fft.fft(col_data, axis=0))
+            
+            fft_dfs.append(pd.DataFrame({f"{col}{marker}fft": fft_values}, index=df.index))
+
         if fft_dfs:
             result_df = pd.concat([df] + fft_dfs, axis=1)
         else:
@@ -48,7 +54,7 @@ class FFTTransform(TransformBase):
         
         self.inversion_state = {
             'original_columns': self._original_names,
-            'fft_columns': [f"{col}_fft" for col in self._numeric_columns if col in df.columns]
+            'fft_columns': [f"{col}{marker}fft" for col in self._numeric_columns if col in df.columns]
         }
         
         return TimeSeries.from_pd(result_df)

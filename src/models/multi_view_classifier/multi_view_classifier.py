@@ -1,12 +1,14 @@
 from typing import Optional
 from models.multi_view_classifier.config import MultiViewClassifierConfig
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from merlion.models.anomaly.base import DetectorBase
 from merlion.utils import TimeSeries
 import numpy as np
 import pandas as pd
+from pytorch_metric_learning import losses
 
 from .model import Encoder, Classifier
 
@@ -64,7 +66,7 @@ class MultiViewClassifier(DetectorBase):
         )
 
         # Initialize gradient scaler for mixed precision
-        self.scaler = GradScaler()
+        self.scaler = GradScaler("cuda")
 
     def _get_device(self):
         """Determine device for training"""
@@ -137,6 +139,11 @@ class MultiViewClassifier(DetectorBase):
         dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(xt)
         xf = time_series[fft_cols].values if fft_cols else np.zeros_like(xt)
 
+        if xt.ndim == 2:
+            xt = xt[:, :, np.newaxis]
+            dx = dx[:, :, np.newaxis]
+            xf = xf[:, :, np.newaxis]
+
         return xt, dx, xf
 
     def _augment_data(self, xt, dx, xf):
@@ -168,7 +175,7 @@ class MultiViewClassifier(DetectorBase):
 
         # Mask out self-similarity
         mask = torch.eye(2 * batch_size, dtype=torch.bool).to(self.device)
-        similarity_matrix = similarity_matrix.masked_fill(mask, -9e15)
+        similarity_matrix = similarity_matrix.masked_fill(mask, -1e4)
 
         # Compute loss
         similarity_matrix = similarity_matrix / temperature
@@ -228,6 +235,13 @@ class MultiViewClassifier(DetectorBase):
         self._set_training_mode()
 
         # Create dataset and dataloader
+
+        print(f"xt shape: {xt.shape}")
+        print(f"dx shape: {dx.shape}")
+        print(f"xf shape: {xf.shape}")
+        print(f"labels shape: {labels.shape}")
+        print(f"labels type: {type(labels)}")
+        print(f"Batch sizes - xt: {xt.shape[0]}, dx: {dx.shape[0]}, xf: {xf.shape[0]}, labels: {len(labels)}")
         dataset = torch.utils.data.TensorDataset(
             torch.FloatTensor(xt),
             torch.FloatTensor(dx),
@@ -239,11 +253,16 @@ class MultiViewClassifier(DetectorBase):
             dataset, batch_size=self.config.batch_size, shuffle=True, drop_last=True
         )
 
+        info_loss = losses.NTXentLoss(temperature=self.config.temperature)
+        info_criterion = losses.SelfSupervisedLoss(info_loss, symmetric=True)
+        criterion = nn.CrossEntropyLoss()
+
         total_loss = 0.0
         total_loss_c = 0.0
         total_samples = 0
 
         for batch_xt, batch_dx, batch_xf, batch_y in loader:
+            torch.cuda.empty_cache()
             batch_xt = batch_xt.to(self.device)
             batch_dx = batch_dx.to(self.device)
             batch_xf = batch_xf.to(self.device)
@@ -258,7 +277,7 @@ class MultiViewClassifier(DetectorBase):
             if self.config.mode != "pretrain":
                 self.clf_optimizer.zero_grad()
 
-            with autocast(enabled=True):
+            with autocast("cuda", enabled=True):
                 # Forward pass - original
                 ht, hd, hf, zt, zd, zf = self.encoder(batch_xt, batch_dx, batch_xf)
 
@@ -268,24 +287,22 @@ class MultiViewClassifier(DetectorBase):
                 )
 
                 # Contrastive loss for each domain
-                loss_t = self._contrastive_loss(zt, zt_aug)
-                loss_d = self._contrastive_loss(zd, zd_aug)
-                loss_f = self._contrastive_loss(zf, zf_aug)
-
+                loss_t = info_criterion(zt, zt_aug)
+                loss_d = info_criterion(zd, zd_aug)
+                loss_f = info_criterion(zf, zf_aug)
+    
                 # Combined contrastive loss
-                loss = self._compute_loss_by_type(loss_t, loss_d, loss_f)
-                loss += self._weight_regularization(self.encoder)
-
-                # Supervised classification loss
+                loss = self._compute_loss_by_type(self.config.loss_type, loss_t, loss_d, loss_f) + self._weight_regularization(self.encoder)
+              # Supervised classification loss
                 if self.config.mode != "pretrain":
                     if self.config.feature == "latent":
                         logits = self.classifier(zt, zd, zf)
                     else:
                         logits = self.classifier(ht, hd, hf)
 
-                    loss_c = F.cross_entropy(logits, batch_y)
+                    loss_c = criterion(logits, batch_y.long())
                     loss = self.config.lam * loss + loss_c
-                    loss += self._weight_regularization(self.classifier)
+                    loss = self.config.lam * loss + loss_c + self._weight_regularization(self.classifier)
 
                     total_loss_c += loss_c.item() * batch_xt.size(0)
 
@@ -323,14 +340,23 @@ class MultiViewClassifier(DetectorBase):
 
         # Extract domains
         xt, dx, xf = self._extract_domains(train_data)
+
         labels = anomaly_labels.to_pd().values.flatten()
+
+        print(f"After extraction: xt={xt.shape}, dx={dx.shape}, xf={xf.shape}, labels={labels.shape}")
+        assert xt.shape[0] == dx.shape[0] == xf.shape[0] == len(labels), \
+            f"Shape mismatch: xt={xt.shape[0]}, dx={dx.shape[0]}, xf={xf.shape[0]}, labels={len(labels)}"
 
         print(f"Training MultiDomainClassifier for {self.config.num_epochs} epochs...")
         print(f"Mode: {self.config.mode}, Loss type: {self.config.loss_type}")
-
+        best_loss = float('inf')
         # Training loop
         for epoch in range(self.config.num_epochs):
             avg_loss, avg_loss_c = self._train_epoch(xt, dx, xf, labels)
+            if avg_loss < best_loss or (epoch + 1) % 50 == 0:
+                if avg_loss < best_loss:
+                    best_loss = avg_loss
+                self.save(dirname=self.config.save_dir, save_config=True)
 
             if self.config.mode == "pretrain":
                 print(f"Epoch {epoch+1}/{self.config.num_epochs}, Loss: {avg_loss:.4f}")
@@ -353,13 +379,15 @@ class MultiViewClassifier(DetectorBase):
         self.encoder.eval()
         self.classifier.eval()
 
-        # Extract domains
         xt, dx, xf = self._extract_domains(time_series)
 
-        # Convert to tensors
-        xt_tensor = torch.FloatTensor(xt).unsqueeze(0).to(self.device)
-        dx_tensor = torch.FloatTensor(dx).unsqueeze(0).to(self.device)
-        xf_tensor = torch.FloatTensor(xf).unsqueeze(0).to(self.device)
+        print(xt.shape, dx.shape, xf.shape)
+
+        xt_tensor = torch.FloatTensor(xt).to(self.device)
+        dx_tensor = torch.FloatTensor(dx).to(self.device)
+        xf_tensor = torch.FloatTensor(xf).to(self.device)
+
+        print(xt_tensor.shape, dx_tensor.shape, xf_tensor.shape)
 
         with torch.no_grad():
             # Forward pass

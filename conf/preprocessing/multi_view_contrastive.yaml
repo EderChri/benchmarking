@@ -1,4 +1,5 @@
 transforms:
+
   - class: MeanVarNormalize
     module: normalize
     source: merlion

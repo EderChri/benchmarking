@@ -41,6 +41,9 @@ class TorchDatasetLoader(BaseDataLoader):
             val_ts, val_labels = self._truncate_pair(val_ts, val_labels)
             test_ts, test_labels = self._truncate_pair(test_ts, test_labels)
 
+        print(f"Loaded supervised dataset with {len(train_ts)} training samples, "
+              f"{len(val_ts)} validation samples, and {len(test_ts)} test samples.")
+
         return (train_ts, train_labels), (val_ts, val_labels), (test_ts, test_labels)
 
     def _load_unsupervised(self, train_data, val_data, test_data):
