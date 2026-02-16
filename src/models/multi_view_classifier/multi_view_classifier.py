@@ -1,5 +1,10 @@
 from typing import Optional
 from models.multi_view_classifier.config import MultiViewClassifierConfig
+import os
+import shutil
+import hashlib
+import yaml
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,32 +27,32 @@ class MultiViewClassifier(DetectorBase):
     """
 
     config_class = MultiViewClassifierConfig
-    
+
     @property
     def require_even_sampling(self) -> bool:
         """
         Whether the model requires evenly sampled time series.
-        
+
         Returns:
             False - model can handle irregularly sampled data
         """
         return False
-    
+
     @property
     def require_univariate(self) -> bool:
         """
         Whether the model requires univariate time series.
-        
+
         Returns:
             False - model supports multivariate time series across domains
         """
         return False
-    
 
-    def __init__(self, config: MultiViewClassifierConfig):
+    def __init__(self, config: MultiViewClassifierConfig, save_dir: Optional[str] = None):
         super().__init__(config)
         self.config = config
         self.device = self._get_device()
+        self.save_dir = save_dir
 
         # Initialize encoder and classifier
         self.encoder = self._create_encoder().to(self.device)
@@ -115,7 +120,8 @@ class MultiViewClassifier(DetectorBase):
             state_dict = checkpoint
 
         # Remove 'module.' prefix if exists (from DataParallel)
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        state_dict = {k.replace("module.", ""): v for k,
+                      v in state_dict.items()}
 
         self.encoder.load_state_dict(state_dict, strict=False)
         print(f"Loaded pre-trained weights from {checkpoint_path}")
@@ -131,12 +137,15 @@ class MultiViewClassifier(DetectorBase):
             for c in time_series.columns
             if not c.endswith("_derivative") and not c.endswith("_fft")
         ]
-        derivative_cols = [c for c in time_series.columns if c.endswith("_derivative")]
+        derivative_cols = [
+            c for c in time_series.columns if c.endswith("_derivative")]
         fft_cols = [c for c in time_series.columns if c.endswith("_fft")]
 
         # Extract data for each domain
-        xt = time_series[original_cols].values if original_cols else np.zeros((len(time_series), 1))
-        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(xt)
+        xt = time_series[original_cols].values if original_cols else np.zeros(
+            (len(time_series), 1))
+        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(
+            xt)
         xf = time_series[fft_cols].values if fft_cols else np.zeros_like(xt)
 
         if xt.ndim == 2:
@@ -155,33 +164,6 @@ class MultiViewClassifier(DetectorBase):
         xf_aug = xf + torch.randn_like(xf) * strength
 
         return xt_aug, dx_aug, xf_aug
-
-    def _contrastive_loss(self, z1, z2):
-        """Compute NT-Xent contrastive loss"""
-        temperature = self.config.temperature
-        batch_size = z1.shape[0]
-
-        # Normalize embeddings
-        z1 = F.normalize(z1, dim=1)
-        z2 = F.normalize(z2, dim=1)
-
-        # Compute similarity matrix
-        representations = torch.cat([z1, z2], dim=0)
-        similarity_matrix = torch.matmul(representations, representations.T)
-
-        # Create labels
-        labels = torch.arange(batch_size).to(self.device)
-        labels = torch.cat([labels + batch_size, labels], dim=0)
-
-        # Mask out self-similarity
-        mask = torch.eye(2 * batch_size, dtype=torch.bool).to(self.device)
-        similarity_matrix = similarity_matrix.masked_fill(mask, -1e4)
-
-        # Compute loss
-        similarity_matrix = similarity_matrix / temperature
-        loss = F.cross_entropy(similarity_matrix, labels)
-
-        return loss
 
     def _compute_loss_by_type(self, loss_t, loss_d, loss_f):
         """Compute combined loss based on loss_type"""
@@ -235,13 +217,6 @@ class MultiViewClassifier(DetectorBase):
         self._set_training_mode()
 
         # Create dataset and dataloader
-
-        print(f"xt shape: {xt.shape}")
-        print(f"dx shape: {dx.shape}")
-        print(f"xf shape: {xf.shape}")
-        print(f"labels shape: {labels.shape}")
-        print(f"labels type: {type(labels)}")
-        print(f"Batch sizes - xt: {xt.shape[0]}, dx: {dx.shape[0]}, xf: {xf.shape[0]}, labels: {len(labels)}")
         dataset = torch.utils.data.TensorDataset(
             torch.FloatTensor(xt),
             torch.FloatTensor(dx),
@@ -279,7 +254,8 @@ class MultiViewClassifier(DetectorBase):
 
             with autocast("cuda", enabled=True):
                 # Forward pass - original
-                ht, hd, hf, zt, zd, zf = self.encoder(batch_xt, batch_dx, batch_xf)
+                ht, hd, hf, zt, zd, zf = self.encoder(
+                    batch_xt, batch_dx, batch_xf)
 
                 # Forward pass - augmented
                 _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(
@@ -290,9 +266,10 @@ class MultiViewClassifier(DetectorBase):
                 loss_t = info_criterion(zt, zt_aug)
                 loss_d = info_criterion(zd, zd_aug)
                 loss_f = info_criterion(zf, zf_aug)
-    
+
                 # Combined contrastive loss
-                loss = self._compute_loss_by_type(self.config.loss_type, loss_t, loss_d, loss_f) + self._weight_regularization(self.encoder)
+                loss = self._compute_loss_by_type(
+                    loss_t, loss_d, loss_f) + self._weight_regularization(self.encoder)
               # Supervised classification loss
                 if self.config.mode != "pretrain":
                     if self.config.feature == "latent":
@@ -302,7 +279,8 @@ class MultiViewClassifier(DetectorBase):
 
                     loss_c = criterion(logits, batch_y.long())
                     loss = self.config.lam * loss + loss_c
-                    loss = self.config.lam * loss + loss_c + self._weight_regularization(self.classifier)
+                    loss = self.config.lam * loss + loss_c + \
+                        self._weight_regularization(self.classifier)
 
                     total_loss_c += loss_c.item() * batch_xt.size(0)
 
@@ -336,18 +314,21 @@ class MultiViewClassifier(DetectorBase):
         Core training method called by DetectorBase.train().
         """
         if anomaly_labels is None:
-            raise ValueError("MultiDomainClassifier requires labels for training")
+            raise ValueError(
+                "MultiDomainClassifier requires labels for training")
 
         # Extract domains
         xt, dx, xf = self._extract_domains(train_data)
 
         labels = anomaly_labels.to_pd().values.flatten()
 
-        print(f"After extraction: xt={xt.shape}, dx={dx.shape}, xf={xf.shape}, labels={labels.shape}")
+        print(
+            f"After extraction: xt={xt.shape}, dx={dx.shape}, xf={xf.shape}, labels={labels.shape}")
         assert xt.shape[0] == dx.shape[0] == xf.shape[0] == len(labels), \
             f"Shape mismatch: xt={xt.shape[0]}, dx={dx.shape[0]}, xf={xf.shape[0]}, labels={len(labels)}"
 
-        print(f"Training MultiDomainClassifier for {self.config.num_epochs} epochs...")
+        print(
+            f"Training MultiDomainClassifier for {self.config.num_epochs} epochs...")
         print(f"Mode: {self.config.mode}, Loss type: {self.config.loss_type}")
         best_loss = float('inf')
         # Training loop
@@ -356,10 +337,11 @@ class MultiViewClassifier(DetectorBase):
             if avg_loss < best_loss or (epoch + 1) % 50 == 0:
                 if avg_loss < best_loss:
                     best_loss = avg_loss
-                self.save(dirname=self.config.save_dir, save_config=True)
+                self.save(save_config=True)
 
             if self.config.mode == "pretrain":
-                print(f"Epoch {epoch+1}/{self.config.num_epochs}, Loss: {avg_loss:.4f}")
+                print(
+                    f"Epoch {epoch+1}/{self.config.num_epochs}, Loss: {avg_loss:.4f}")
             else:
                 print(
                     f"Epoch {epoch+1}/{self.config.num_epochs}, "
@@ -391,7 +373,8 @@ class MultiViewClassifier(DetectorBase):
 
         with torch.no_grad():
             # Forward pass
-            ht, hd, hf, zt, zd, zf = self.encoder(xt_tensor, dx_tensor, xf_tensor)
+            ht, hd, hf, zt, zd, zf = self.encoder(
+                xt_tensor, dx_tensor, xf_tensor)
 
             if self.config.feature == "latent":
                 logits = self.classifier(zt, zd, zf)
@@ -416,39 +399,45 @@ class MultiViewClassifier(DetectorBase):
 
         return TimeSeries.from_pd(score_df)
 
-    def save(self, dirname: str, **save_config):
+    def save(self, **save_config):
         """Save model checkpoint"""
-        import os
 
-        super().save(dirname, **save_config)
+        print("Saving model checkpoint...")
+        class_name = self.__class__.__name__
+        snake_case_name = re.sub(r'(?<!^)(?=[A-Z])', '_', class_name).lower()
 
-        # Save PyTorch model weights
-        torch.save(
-            {
-                "encoder_state_dict": self.encoder.state_dict(),
-                "classifier_state_dict": self.classifier.state_dict(),
-                "encoder_optimizer": self.encoder_optimizer.state_dict(),
-                "clf_optimizer": self.clf_optimizer.state_dict(),
-            },
-            os.path.join(dirname, "pytorch_model.pt"),
-        )
+        # Read and hash YAML config
+        yaml_path = f"conf/models/{snake_case_name}.yaml"
+        with open(yaml_path, 'r') as f:
+            yaml_content = f.read()
+
+        config_hash = hashlib.md5(yaml_content.encode()).hexdigest()[:16]
+        hash_dir = os.path.join(self.save_dir, "models", config_hash)
+
+        os.makedirs(hash_dir, exist_ok=True)
+
+        yaml_dest = os.path.join(hash_dir, f"{snake_case_name}.yaml")
+        if not os.path.exists(yaml_dest):
+            shutil.copy2(yaml_path, yaml_dest)
+
+        super().save(hash_dir, **save_config)
 
     @classmethod
-    def load(cls, dirname: str, **kwargs):
-        """Load model from checkpoint"""
-        import os
+    def load(cls, dirname: str, config_dict: dict, **kwargs):
+        """Load model from checkpoint
+
+        Args:
+            dirname: Parent directory containing models/
+            config_dict: Configuration dictionary (will be hashed to find correct checkpoint)
+        """
+
+        # Reproduce hash from config
+        yaml_content = yaml.dump(
+            config_dict, sort_keys=True, default_flow_style=False)
+        config_hash = hashlib.md5(yaml_content.encode()).hexdigest()[:16]
+        hash_dir = os.path.join(dirname, "models", config_hash)
 
         # Load Merlion config
-        model = super().load(dirname, **kwargs)
-
-        # Load PyTorch weights if they exist
-        pytorch_path = os.path.join(dirname, "pytorch_model.pt")
-        if os.path.exists(pytorch_path):
-            checkpoint = torch.load(pytorch_path, map_location="cpu")
-
-            model.encoder.load_state_dict(checkpoint["encoder_state_dict"])
-            model.classifier.load_state_dict(checkpoint["classifier_state_dict"])
-            model.encoder_optimizer.load_state_dict(checkpoint["encoder_optimizer"])
-            model.clf_optimizer.load_state_dict(checkpoint["clf_optimizer"])
+        model = super().load(hash_dir, **kwargs)
 
         return model

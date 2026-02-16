@@ -6,7 +6,7 @@ import torch.nn.functional as F
 # Code taken from https://github.com/yongkyung-oh/Multi-View_Contrastive_Learning/blob/main/src/model.py
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, hidden_dim, dropout=0.1, max_len=1024):
+    def __init__(self, hidden_dim, dropout=0.1, max_len=2048):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 

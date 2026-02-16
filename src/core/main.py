@@ -91,7 +91,8 @@ class BenchmarkRunner:
 
         source = config.get("source", "default")
         if source == "merlion":
-            module = importlib.import_module(f"merlion.evaluate.{config['module']}")
+            module = importlib.import_module(
+                f"merlion.evaluate.{config['module']}")
             metric_enum = getattr(module, config["class"])
             return getattr(metric_enum, config["metric_name"])
         else:
@@ -113,7 +114,7 @@ class BenchmarkRunner:
         model_config = config_cls(**config.get("params", {}))
 
         model_cls = getattr(module, config["class"])
-        return model_cls(model_config)
+        return model_cls(model_config, save_dir=f"src/data/.cache/{self.current_cache_key}")
 
     def _instantiate_preprocessing(self, config: Dict[str, Any]):
         source = config.get("source", "default")
@@ -160,7 +161,7 @@ class BenchmarkRunner:
 
     def run_experiments(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.experiment_dir = Path("results") / timestamp
+        self.experiment_dir = Path("src/results") / timestamp
         self.experiment_dir.mkdir(parents=True, exist_ok=True)
 
         exp_config = self.load_yaml(self.config_dir / "experiments.yaml")
@@ -176,7 +177,7 @@ class BenchmarkRunner:
                 configs = self._load_run_configs(run)
 
                 data_splits = self._get_preprocessed_data(run, configs)
-
+                self.current_cache_key = self.cache.cache_key if self.cache else None
                 (
                     train_data,
                     test_data,
@@ -188,7 +189,7 @@ class BenchmarkRunner:
                 ) = self._parse_data_splits(data_splits)
 
                 start_time = time.time()
-                
+
                 print("Training model...")
                 model = self._train_model(
                     configs["model"], run["task"], train_data, train_labels
@@ -228,7 +229,8 @@ class BenchmarkRunner:
         """Load all configuration components for a run"""
         data_cfg = self.get_component_by_name(run["data"], "data")
         model_cfg = self.get_component_by_name(run["model"], "models")
-        preproc_cfg = self.get_component_by_name(run["preprocessor"], "preprocessing")
+        preproc_cfg = self.get_component_by_name(
+            run["preprocessor"], "preprocessing")
 
         # Add target to model config if specified
         target_seq_index = run.get("target", None)
@@ -323,7 +325,8 @@ class BenchmarkRunner:
                     test_labels, val_labels, has_labels)
         """
         if isinstance(data_splits[0], tuple):  # Supervised
-            (train_data, train_labels), (test_data, test_labels) = data_splits[:2]
+            (train_data, train_labels), (test_data,
+                                         test_labels) = data_splits[:2]
             has_labels = True
 
             if len(data_splits) == 3:
