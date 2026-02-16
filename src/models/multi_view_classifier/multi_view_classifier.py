@@ -1,24 +1,18 @@
 from typing import Optional
 from models.multi_view_classifier.config import MultiViewClassifierConfig
-import os
-import shutil
-import hashlib
-import yaml
-import re
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.amp import autocast, GradScaler
-from merlion.models.anomaly.base import DetectorBase
 from merlion.utils import TimeSeries
 import numpy as np
 import pandas as pd
 from pytorch_metric_learning import losses
 
 from .model import Encoder, Classifier
+from models.hash_checkpoint_model import HashCheckpointModel
 
 
-class MultiViewClassifier(DetectorBase):
+class MultiViewClassifier(HashCheckpointModel):
     """
     Multi-View Transformer Classifier for Merlion.
 
@@ -30,37 +24,22 @@ class MultiViewClassifier(DetectorBase):
 
     @property
     def require_even_sampling(self) -> bool:
-        """
-        Whether the model requires evenly sampled time series.
-
-        Returns:
-            False - model can handle irregularly sampled data
-        """
         return False
 
     @property
     def require_univariate(self) -> bool:
-        """
-        Whether the model requires univariate time series.
-
-        Returns:
-            False - model supports multivariate time series across domains
-        """
         return False
 
     def __init__(self, config: MultiViewClassifierConfig, save_dir: Optional[str] = None):
-        super().__init__(config)
-        self.config = config
+        super().__init__(config, save_dir)
+        if not hasattr(self, 'current_epoch'):
+            self.current_epoch = 0
+        
         self.device = self._get_device()
-        self.save_dir = save_dir
 
         # Initialize encoder and classifier
         self.encoder = self._create_encoder().to(self.device)
         self.classifier = self._create_classifier().to(self.device)
-
-        # Load pre-trained weights if specified
-        if config.checkpoint_path:
-            self._load_checkpoint(config.checkpoint_path)
 
         # Initialize optimizers
         self.encoder_optimizer = torch.optim.Adam(
@@ -72,6 +51,19 @@ class MultiViewClassifier(DetectorBase):
 
         # Initialize gradient scaler for mixed precision
         self.scaler = GradScaler("cuda")
+
+        # Try to load existing checkpoint, otherwise load pre-trained weights
+        if not self._try_load_existing_checkpoint():
+            if config.checkpoint_path:
+                self._load_pretrained_checkpoint(config.checkpoint_path)
+
+    def _load_checkpoint_state(self, loaded_model):
+        """Transfer state from loaded model to current instance"""
+        self.encoder.load_state_dict(loaded_model.encoder.state_dict())
+        self.classifier.load_state_dict(loaded_model.classifier.state_dict())
+        self.encoder_optimizer.load_state_dict(loaded_model.encoder_optimizer.state_dict())
+        self.clf_optimizer.load_state_dict(loaded_model.clf_optimizer.state_dict())
+        self.current_epoch = loaded_model.current_epoch
 
     def _get_device(self):
         """Determine device for training"""
@@ -110,8 +102,8 @@ class MultiViewClassifier(DetectorBase):
         )
         return Classifier(args)
 
-    def _load_checkpoint(self, checkpoint_path: str):
-        """Load pre-trained encoder weights"""
+    def _load_pretrained_checkpoint(self, checkpoint_path: str):
+        """Load pre-trained encoder weights (different from resuming training)"""
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
 
         if "encoder_state_dict" in checkpoint:
@@ -120,8 +112,7 @@ class MultiViewClassifier(DetectorBase):
             state_dict = checkpoint
 
         # Remove 'module.' prefix if exists (from DataParallel)
-        state_dict = {k.replace("module.", ""): v for k,
-                      v in state_dict.items()}
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
 
         self.encoder.load_state_dict(state_dict, strict=False)
         print(f"Loaded pre-trained weights from {checkpoint_path}")
@@ -137,15 +128,13 @@ class MultiViewClassifier(DetectorBase):
             for c in time_series.columns
             if not c.endswith("_derivative") and not c.endswith("_fft")
         ]
-        derivative_cols = [
-            c for c in time_series.columns if c.endswith("_derivative")]
+        derivative_cols = [c for c in time_series.columns if c.endswith("_derivative")]
         fft_cols = [c for c in time_series.columns if c.endswith("_fft")]
 
         # Extract data for each domain
         xt = time_series[original_cols].values if original_cols else np.zeros(
             (len(time_series), 1))
-        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(
-            xt)
+        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(xt)
         xf = time_series[fft_cols].values if fft_cols else np.zeros_like(xt)
 
         if xt.ndim == 2:
@@ -216,7 +205,6 @@ class MultiViewClassifier(DetectorBase):
         """Train for one epoch"""
         self._set_training_mode()
 
-        # Create dataset and dataloader
         dataset = torch.utils.data.TensorDataset(
             torch.FloatTensor(xt),
             torch.FloatTensor(dx),
@@ -237,7 +225,8 @@ class MultiViewClassifier(DetectorBase):
         total_samples = 0
 
         for batch_xt, batch_dx, batch_xf, batch_y in loader:
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             batch_xt = batch_xt.to(self.device)
             batch_dx = batch_dx.to(self.device)
             batch_xf = batch_xf.to(self.device)
@@ -254,13 +243,14 @@ class MultiViewClassifier(DetectorBase):
 
             with autocast("cuda", enabled=True):
                 # Forward pass - original
-                ht, hd, hf, zt, zd, zf = self.encoder(
-                    batch_xt, batch_dx, batch_xf)
+                ht, hd, hf, zt, zd, zf = self.encoder(batch_xt, batch_dx, batch_xf)
 
                 # Forward pass - augmented
-                _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(
+                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = self.encoder(
                     batch_xt_aug, batch_dx_aug, batch_xf_aug
                 )
+                # Explicitly delete unused tensors
+                del ht_aug, hd_aug, hf_aug
 
                 # Contrastive loss for each domain
                 loss_t = info_criterion(zt, zt_aug)
@@ -270,7 +260,8 @@ class MultiViewClassifier(DetectorBase):
                 # Combined contrastive loss
                 loss = self._compute_loss_by_type(
                     loss_t, loss_d, loss_f) + self._weight_regularization(self.encoder)
-              # Supervised classification loss
+                
+                # Supervised classification loss
                 if self.config.mode != "pretrain":
                     if self.config.feature == "latent":
                         logits = self.classifier(zt, zd, zf)
@@ -278,7 +269,6 @@ class MultiViewClassifier(DetectorBase):
                         logits = self.classifier(ht, hd, hf)
 
                     loss_c = criterion(logits, batch_y.long())
-                    loss = self.config.lam * loss + loss_c
                     loss = self.config.lam * loss + loss_c + \
                         self._weight_regularization(self.classifier)
 
@@ -310,16 +300,12 @@ class MultiViewClassifier(DetectorBase):
         train_config=None,
         anomaly_labels: Optional[TimeSeries] = None,
     ) -> TimeSeries:
-        """
-        Core training method called by DetectorBase.train().
-        """
+        """Core training method called by DetectorBase.train()."""
         if anomaly_labels is None:
-            raise ValueError(
-                "MultiDomainClassifier requires labels for training")
+            raise ValueError("MultiDomainClassifier requires labels for training")
 
         # Extract domains
         xt, dx, xf = self._extract_domains(train_data)
-
         labels = anomaly_labels.to_pd().values.flatten()
 
         print(
@@ -327,21 +313,26 @@ class MultiViewClassifier(DetectorBase):
         assert xt.shape[0] == dx.shape[0] == xf.shape[0] == len(labels), \
             f"Shape mismatch: xt={xt.shape[0]}, dx={dx.shape[0]}, xf={xf.shape[0]}, labels={len(labels)}"
 
-        print(
-            f"Training MultiDomainClassifier for {self.config.num_epochs} epochs...")
+        print(f"Training MultiDomainClassifier for {self.config.num_epochs} epochs...")
         print(f"Mode: {self.config.mode}, Loss type: {self.config.loss_type}")
         best_loss = float('inf')
+        
+        start_epoch = self.current_epoch
+        if start_epoch != 0:
+            print(f"Resuming training from last checkpoint at epoch {start_epoch+1}")
+            start_epoch += 1
         # Training loop
-        for epoch in range(self.config.num_epochs):
+        for epoch in range(start_epoch, self.config.num_epochs):
+            self.current_epoch = epoch
             avg_loss, avg_loss_c = self._train_epoch(xt, dx, xf, labels)
+            
             if avg_loss < best_loss or (epoch + 1) % 50 == 0:
                 if avg_loss < best_loss:
                     best_loss = avg_loss
                 self.save(save_config=True)
 
             if self.config.mode == "pretrain":
-                print(
-                    f"Epoch {epoch+1}/{self.config.num_epochs}, Loss: {avg_loss:.4f}")
+                print(f"Epoch {epoch+1}/{self.config.num_epochs}, Loss: {avg_loss:.4f}")
             else:
                 print(
                     f"Epoch {epoch+1}/{self.config.num_epochs}, "
@@ -349,95 +340,66 @@ class MultiViewClassifier(DetectorBase):
                 )
 
         # Return anomaly scores on training data
-        return self._get_anomaly_score(train_data)
+        return self.get_anomaly_score(train_data)
 
-    def _get_anomaly_score(
+    def get_anomaly_score(
         self, time_series: TimeSeries, time_series_prev: Optional[TimeSeries] = None
     ) -> TimeSeries:
-        """
-        Core method to compute anomaly scores.
-        Returns probability of anomaly class.
-        """
+        """Core method to compute anomaly scores."""
         self.encoder.eval()
         self.classifier.eval()
 
         xt, dx, xf = self._extract_domains(time_series)
-
-        print(xt.shape, dx.shape, xf.shape)
-
-        xt_tensor = torch.FloatTensor(xt).to(self.device)
-        dx_tensor = torch.FloatTensor(dx).to(self.device)
-        xf_tensor = torch.FloatTensor(xf).to(self.device)
-
-        print(xt_tensor.shape, dx_tensor.shape, xf_tensor.shape)
-
+        
+        # xt shape is [num_timestamps, num_features, 1] - we need one score per timestamp
+        batch_size = self.config.batch_size
+        num_samples = xt.shape[0]  # This is number of timestamps
+        all_scores = []
+        
         with torch.no_grad():
-            # Forward pass
-            ht, hd, hf, zt, zd, zf = self.encoder(
-                xt_tensor, dx_tensor, xf_tensor)
-
-            if self.config.feature == "latent":
-                logits = self.classifier(zt, zd, zf)
-            else:
-                logits = self.classifier(ht, hd, hf)
-
-            # Get probabilities
-            probs = torch.softmax(logits, dim=-1)
-
-            # Return probability of positive class (class 1 is anomaly)
-            if probs.shape[1] > 1:
-                scores = probs[:, 1]
-            else:
-                scores = probs[:, 0]
-
-            scores_np = scores.squeeze().cpu().numpy()
-
-        # Convert to TimeSeries
+            for i in range(0, num_samples, batch_size):
+                end_idx = min(i + batch_size, num_samples)
+                
+                # Batch slice
+                xt_batch = torch.FloatTensor(xt[i:end_idx]).to(self.device)
+                dx_batch = torch.FloatTensor(dx[i:end_idx]).to(self.device)
+                xf_batch = torch.FloatTensor(xf[i:end_idx]).to(self.device)
+                
+                # Forward pass
+                ht, hd, hf, zt, zd, zf = self.encoder(xt_batch, dx_batch, xf_batch)
+                
+                if self.config.feature == "latent":
+                    logits = self.classifier(zt, zd, zf)
+                else:
+                    logits = self.classifier(ht, hd, hf)
+                
+                # Get probabilities
+                probs = torch.softmax(logits, dim=-1)
+                
+                # Return probability of positive class
+                if probs.shape[1] > 1:
+                    scores = probs[:, 1]  # Shape: [batch_size]
+                else:
+                    scores = probs[:, 0]
+                
+                all_scores.append(scores.cpu().numpy())
+                
+                # Clean up batch tensors
+                del xt_batch, dx_batch, xf_batch, ht, hd, hf, zt, zd, zf, logits, probs, scores
+                
+            # Clear cache after inference
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Concatenate all batch scores - shape: [num_timestamps]
+        scores_np = np.concatenate(all_scores)
+        
         score_df = pd.DataFrame(
-            scores_np, index=time_series.to_pd().index, columns=["anom_score"]
+            scores_np.reshape(-1, 1),  # Ensure 2D: [num_timestamps, 1]
+            index=time_series.index,
+            columns=["anom_score"]  # Single column name
         )
-
+        
         return TimeSeries.from_pd(score_df)
 
-    def save(self, **save_config):
-        """Save model checkpoint"""
 
-        print("Saving model checkpoint...")
-        class_name = self.__class__.__name__
-        snake_case_name = re.sub(r'(?<!^)(?=[A-Z])', '_', class_name).lower()
-
-        # Read and hash YAML config
-        yaml_path = f"conf/models/{snake_case_name}.yaml"
-        with open(yaml_path, 'r') as f:
-            yaml_content = f.read()
-
-        config_hash = hashlib.md5(yaml_content.encode()).hexdigest()[:16]
-        hash_dir = os.path.join(self.save_dir, "models", config_hash)
-
-        os.makedirs(hash_dir, exist_ok=True)
-
-        yaml_dest = os.path.join(hash_dir, f"{snake_case_name}.yaml")
-        if not os.path.exists(yaml_dest):
-            shutil.copy2(yaml_path, yaml_dest)
-
-        super().save(hash_dir, **save_config)
-
-    @classmethod
-    def load(cls, dirname: str, config_dict: dict, **kwargs):
-        """Load model from checkpoint
-
-        Args:
-            dirname: Parent directory containing models/
-            config_dict: Configuration dictionary (will be hashed to find correct checkpoint)
-        """
-
-        # Reproduce hash from config
-        yaml_content = yaml.dump(
-            config_dict, sort_keys=True, default_flow_style=False)
-        config_hash = hashlib.md5(yaml_content.encode()).hexdigest()[:16]
-        hash_dir = os.path.join(dirname, "models", config_hash)
-
-        # Load Merlion config
-        model = super().load(hash_dir, **kwargs)
-
-        return model
