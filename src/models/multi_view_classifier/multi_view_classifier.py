@@ -1,4 +1,5 @@
 from typing import Optional
+from models.classifier_base.classifier_base import SupervisedClassifierBase
 from models.multi_view_classifier.config import MultiViewClassifierConfig
 import torch
 import torch.nn as nn
@@ -12,7 +13,7 @@ from .model import Encoder, Classifier
 from models.hash_checkpoint_model import HashCheckpointModel
 
 
-class MultiViewClassifier(HashCheckpointModel):
+class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
     """
     Multi-View Transformer Classifier for Merlion.
 
@@ -31,11 +32,13 @@ class MultiViewClassifier(HashCheckpointModel):
         return False
 
     def __init__(self, config: MultiViewClassifierConfig, save_dir: Optional[str] = None):
-        super().__init__(config, save_dir)
+        SupervisedClassifierBase.__init__(self, config)
+        HashCheckpointModel.__init__(self, config, save_dir)
         if not hasattr(self, 'current_epoch'):
             self.current_epoch = 0
         
         self.device = self._get_device()
+
 
         # Initialize encoder and classifier
         self.encoder = self._create_encoder().to(self.device)
@@ -56,6 +59,24 @@ class MultiViewClassifier(HashCheckpointModel):
         if not self._try_load_existing_checkpoint():
             if config.checkpoint_path:
                 self._load_pretrained_checkpoint(config.checkpoint_path)
+
+    @property
+    def require_univariate(self) -> bool:
+        """Whether the model requires univariate time series."""
+        return False
+    
+    def train_post_process(self, train_result: TimeSeries) -> TimeSeries:
+        """
+        Post-process training results.
+        
+        Args:
+            train_result: Result from _train() method
+            
+        Returns:
+            Processed training result
+        """
+        # No post-processing needed for this model
+        return train_result
 
     def _load_checkpoint_state(self, loaded_model):
         """Transfer state from loaded model to current instance"""
@@ -298,15 +319,15 @@ class MultiViewClassifier(HashCheckpointModel):
         self,
         train_data: TimeSeries,
         train_config=None,
-        anomaly_labels: Optional[TimeSeries] = None,
+        train_labels: Optional[TimeSeries] = None,
     ) -> TimeSeries:
         """Core training method called by DetectorBase.train()."""
-        if anomaly_labels is None:
+        if train_labels is None:
             raise ValueError("MultiDomainClassifier requires labels for training")
 
         # Extract domains
         xt, dx, xf = self._extract_domains(train_data)
-        labels = anomaly_labels.to_pd().values.flatten()
+        labels = train_labels.to_pd().values.flatten()
 
         print(
             f"After extraction: xt={xt.shape}, dx={dx.shape}, xf={xf.shape}, labels={labels.shape}")
@@ -339,28 +360,36 @@ class MultiViewClassifier(HashCheckpointModel):
                     f"Loss: {avg_loss:.4f}, Loss_c: {avg_loss_c:.4f}"
                 )
 
-        # Return anomaly scores on training data
-        return self.get_anomaly_score(train_data)
+        # Return classification scores on training data
+        return self.get_classification_score(TimeSeries.from_pd(train_data))
 
-    def get_anomaly_score(
-        self, time_series: TimeSeries, time_series_prev: Optional[TimeSeries] = None
+    def _get_classification_score(
+        self,
+        time_series: TimeSeries,
+        time_series_prev: Optional[TimeSeries] = None,
     ) -> TimeSeries:
-        """Core method to compute anomaly scores."""
+        """
+        Get classification probability for a single sequence.
+        
+        Returns probability of positive class, broadcast to all timestamps.
+        """
         self.encoder.eval()
         self.classifier.eval()
 
         xt, dx, xf = self._extract_domains(time_series)
-        
-        # xt shape is [num_timestamps, num_features, 1] - we need one score per timestamp
-        batch_size = self.config.batch_size
-        num_samples = xt.shape[0]  # This is number of timestamps
+        num_patients = xt.shape[0]
+        seq_len = xt.shape[1]
+        print(f"Processing {num_patients} patients with seq_len={seq_len}")
+    
+        # Process in smaller batches to avoid OOM
+        inference_batch_size = 16  # Or smaller if still OOM
         all_scores = []
         
         with torch.no_grad():
-            for i in range(0, num_samples, batch_size):
-                end_idx = min(i + batch_size, num_samples)
+            for i in range(0, num_patients, inference_batch_size):
+                end_idx = min(i + inference_batch_size, num_patients)
                 
-                # Batch slice
+                # Get batch of patients
                 xt_batch = torch.FloatTensor(xt[i:end_idx]).to(self.device)
                 dx_batch = torch.FloatTensor(dx[i:end_idx]).to(self.device)
                 xf_batch = torch.FloatTensor(xf[i:end_idx]).to(self.device)
@@ -373,33 +402,90 @@ class MultiViewClassifier(HashCheckpointModel):
                 else:
                     logits = self.classifier(ht, hd, hf)
                 
-                # Get probabilities
                 probs = torch.softmax(logits, dim=-1)
                 
-                # Return probability of positive class
+                # Get scores for this batch
                 if probs.shape[1] > 1:
-                    scores = probs[:, 1]  # Shape: [batch_size]
+                    batch_scores = probs[:, 1].cpu().numpy()
                 else:
-                    scores = probs[:, 0]
+                    batch_scores = probs[:, 0].cpu().numpy()
                 
-                all_scores.append(scores.cpu().numpy())
+                all_scores.append(batch_scores)
                 
-                # Clean up batch tensors
-                del xt_batch, dx_batch, xf_batch, ht, hd, hf, zt, zd, zf, logits, probs, scores
+                # Clean up
+                del xt_batch, dx_batch, xf_batch, ht, hd, hf, zt, zd, zf, logits, probs
                 
-            # Clear cache after inference
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         
-        # Concatenate all batch scores - shape: [num_timestamps]
-        scores_np = np.concatenate(all_scores)
+        # Concatenate all batch scores
+        scores_np = np.concatenate(all_scores)  # [num_patients]
         
         score_df = pd.DataFrame(
-            scores_np.reshape(-1, 1),  # Ensure 2D: [num_timestamps, 1]
-            index=time_series.index,
-            columns=["anom_score"]  # Single column name
+            scores_np.reshape(-1, 1),
+            index=time_series.to_pd().index,
+            columns=["class_score"]
         )
         
         return TimeSeries.from_pd(score_df)
+        
+    def _predict(
+        self,
+        time_series: TimeSeries,
+        time_series_prev: Optional[TimeSeries] = None,
+    ) -> TimeSeries:
+        """
+        Predict class labels for sequences.
+        
+        Returns:
+            TimeSeries with predicted class for each patient
+        """
+        self.encoder.eval()
+        self.classifier.eval()
+
+        xt, dx, xf = self._extract_domains(time_series)
+        
+        
+        # Handle batch of patients
+        num_patients = xt.shape[0]
+        
+        # Process in batches
+        inference_batch_size = 16
+        all_predictions = []
+        
+        with torch.no_grad():
+            for i in range(0, num_patients, inference_batch_size):
+                end_idx = min(i + inference_batch_size, num_patients)
+                
+                xt_batch = torch.FloatTensor(xt[i:end_idx]).to(self.device)
+                dx_batch = torch.FloatTensor(dx[i:end_idx]).to(self.device)
+                xf_batch = torch.FloatTensor(xf[i:end_idx]).to(self.device)
+                
+                ht, hd, hf, zt, zd, zf = self.encoder(xt_batch, dx_batch, xf_batch)
+                
+                if self.config.feature == "latent":
+                    logits = self.classifier(zt, zd, zf)
+                else:
+                    logits = self.classifier(ht, hd, hf)
+                
+                predictions = logits.argmax(dim=-1).cpu().numpy()
+                all_predictions.append(predictions)
+                
+                del xt_batch, dx_batch, xf_batch, ht, hd, hf, zt, zd, zf, logits
+            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Concatenate predictions
+        predictions_np = np.concatenate(all_predictions)
+        
+        # Return as TimeSeries with same index as input
+        pred_df = pd.DataFrame(
+            predictions_np.reshape(-1, 1),
+            index=time_series.to_pd().index,
+            columns=["prediction"]
+        )
+        
+        return TimeSeries.from_pd(pred_df)
 
 

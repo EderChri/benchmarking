@@ -1,0 +1,5 @@
+name: PointwiseF1
+source: merlion
+module: anomaly
+class: TSADMetric
+metric_name: PointwiseF1

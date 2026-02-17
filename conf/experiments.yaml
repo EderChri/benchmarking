@@ -37,9 +37,9 @@ runs:
 
     # --- Test all datasets ---
   - name: "Test_1 ECG"
-    task: "anomaly"
+    task: "classification"
     data: "ecg"
     model: "multi_view_classifier"
     target: 1
     preprocessor: "multi_view_contrastive"
-    metrics: ["rmse"]
+    metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1"]

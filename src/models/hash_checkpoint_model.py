@@ -4,10 +4,10 @@ import hashlib
 import yaml
 import re
 from typing import Optional, Dict, Any
-from merlion.models.anomaly.base import DetectorBase
+from merlion.models.base import ModelBase
 
 
-class HashCheckpointModel(DetectorBase):
+class HashCheckpointModel(ModelBase):
     """
     Base class for Merlion detectors with hash-based checkpoint management.
     

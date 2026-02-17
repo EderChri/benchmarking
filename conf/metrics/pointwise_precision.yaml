@@ -1,0 +1,5 @@
+name: PointwisePrecision
+source: merlion
+module: anomaly
+class: TSADMetric
+metric_name: PointwisePrecision

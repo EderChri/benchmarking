@@ -1,0 +1,5 @@
+name: F1
+source: merlion
+module: anomaly
+class: TSADMetric
+metric_name: F1

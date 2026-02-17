@@ -433,8 +433,8 @@ class BenchmarkRunner:
         """Instantiate and train model"""
         model = self.instantiate(model_cfg, "models")
 
-        if task in ["anomaly_detection", "anomaly"] and train_labels is not None:
-            model.train(train_data, anomaly_labels=train_labels)
+        if task in ["anomaly_detection", "anomaly", "classification"] and train_labels is not None:
+            model.train(train_data, train_labels=train_labels)
         else:
             model.train(train_data)
 
@@ -479,10 +479,10 @@ class BenchmarkRunner:
         metric_fn = self.instantiate(metric_cfg, "metrics")
 
         # Determine ground truth based on task
-        if task in ["anomaly_detection", "anomaly"]:
+        if task in ["anomaly_detection", "anomaly", "classification"]:
             if not has_labels:
                 raise ValueError(
-                    f"Metric {metric_name} requires labels for anomaly detection"
+                    f"Metric {metric_name} requires labels for {task}"
                 )
             ground_truth = test_labels
         else:  # forecasting, imputation, etc.
@@ -501,6 +501,7 @@ class BenchmarkRunner:
             "anomaly_detection": self._execute_anomaly_detection,
             "forecast": self._execute_forecasting,
             "anomaly": self._execute_anomaly_detection,
+            "classification": self._execute_classification,
         }
 
         task_method = task_methods.get(task_type.lower())
@@ -520,6 +521,10 @@ class BenchmarkRunner:
     def _execute_anomaly_detection(self, model, test_data):
         """Execute anomaly detection task."""
         return model.get_anomaly_score(test_data)
+    
+    def _execute_classification(self, model, test_data):
+        """Execute classification task."""
+        return model.predict(test_data)
 
     def save_run_results(
         self,
