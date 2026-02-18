@@ -1,0 +1,6 @@
+name: NormalizedConfusionMatrix
+source: custom
+module: confusion_matrix
+class: NormalizedConfusionMatrix
+params:
+  threshold: 0.5

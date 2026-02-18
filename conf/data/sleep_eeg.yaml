@@ -1,3 +1,4 @@
 name: SleepEEG
 source: torch_dataset
 dataset_dir: "src/data/SleepEEG"
+has_labels: true

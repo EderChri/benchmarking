@@ -1,0 +1,6 @@
+name: ConfusionMatrix
+source: custom
+module: confusion_matrix
+class: ConfusionMatrix
+params:
+  threshold: 0.5

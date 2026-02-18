@@ -1,12 +1,14 @@
 import trace
 import traceback
 from core.cache import PreprocessingCache
+from metrics.printable_metric import PrintableMetric
+from models.multi_view_classifier import model
 import test
 import yaml
 import importlib
 import inspect
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Union
 from itertools import product
 import os
 import sys
@@ -158,6 +160,38 @@ class BenchmarkRunner:
             return TransformSequence(transforms)
         else:  # Single transform
             return self.instantiate(preproc_config, "preprocessing")
+        
+    def apply_experiment_overrides(self, configs, run):
+        """Apply experiment-level parameter overrides with priority"""
+        overrides = run.get("overrides", {})
+        
+        if not overrides:
+            return configs
+        
+        print(f"\n{'─'*80}")
+        print("Applying experiment-level parameter overrides:")
+        
+        for config_type, params in overrides.items():
+            if config_type not in configs:
+                print(f"  ⚠️  Unknown config type '{config_type}', skipping")
+                continue
+            
+            for param_key, new_value in params.items():
+                if isinstance(new_value, dict) and param_key in configs[config_type]:
+                    # Deep merge for nested dicts
+                    old_dict = configs[config_type][param_key].copy()
+                    configs[config_type][param_key].update(new_value)
+                    for k, v in new_value.items():
+                        old_val = old_dict.get(k, "N/A")
+                        print(f"  ✓ {config_type}.{param_key}.{k}: {old_val} → {v}")
+                else:
+                    # Direct replacement for non-dict values
+                    old_value = configs[config_type].get(param_key)
+                    configs[config_type][param_key] = new_value
+                    print(f"  ✓ {config_type}.{param_key}: {old_value} → {new_value}")
+        
+        print(f"{'─'*80}\n")
+        return configs
 
     def run_experiments(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -175,7 +209,7 @@ class BenchmarkRunner:
 
             try:
                 configs = self._load_run_configs(run)
-
+                configs = self.apply_experiment_overrides(configs, run)
                 data_splits = self._get_preprocessed_data(run, configs)
                 self.current_cache_key = self.cache.cache_key if self.cache else None
                 (
@@ -454,11 +488,19 @@ class BenchmarkRunner:
 
         for metric_name in metric_names:
             try:
-                score = self._evaluate_single_metric(
+                result = self._evaluate_single_metric(
                     metric_name, task, test_data, test_labels, predictions, has_labels
                 )
-                results[metric_name] = float(score)
-                print(f"{metric_name.upper()}: {score:.4f}")
+                if isinstance(result, float):
+                    results[metric_name] = float(result)
+                    print(f"{metric_name.upper()}: {result:.4f}")
+                elif isinstance(result, PrintableMetric):
+                    print(f"{metric_name.upper()}:")
+                    result.print_results()
+                    results[metric_name] = result.to_dict()
+                else:
+                    print(f"{metric_name.upper()}: {result}")
+                    results[metric_name] = result
             except Exception as e:
                 print(f"Failed to evaluate {metric_name}: {str(e)}")
                 results[metric_name] = None
@@ -473,7 +515,7 @@ class BenchmarkRunner:
         test_labels: Optional[TimeSeries],
         predictions,
         has_labels: bool,
-    ) -> float:
+    ) -> Union[float, Any]:
         """Evaluate a single metric"""
         metric_cfg = self.get_component_by_name(metric_name, "metrics")
         metric_fn = self.instantiate(metric_cfg, "metrics")
@@ -583,6 +625,8 @@ class BenchmarkRunner:
             return model.forecast(len(test_data))
         elif task_type == "imputation":
             return model.forecast(len(test_data))
+        elif task_type == "classification":
+            return model.predict(test_data)
         else:
             raise ValueError(f"Unknown task: {task_type}")
 
