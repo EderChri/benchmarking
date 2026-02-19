@@ -36,6 +36,8 @@ class ClassifierBase(ModelBase):
         train_data: TimeSeries,
         train_config=None,
         train_labels: Optional[TimeSeries] = None,
+        val_data: Optional[TimeSeries] = None,
+        val_labels: Optional[TimeSeries] = None,
     ) -> TimeSeries:
         """
         Train the classifier on time series data.
@@ -47,6 +49,8 @@ class ClassifierBase(ModelBase):
             train_config: Additional training configuration
             train_labels: Classification labels for training data.
                 Should be a TimeSeries with integer class labels.
+            val_data: Optional validation data
+            val_labels: Optional validation labels
 
         Returns:
             Training classification scores as TimeSeries
@@ -55,7 +59,10 @@ class ClassifierBase(ModelBase):
             raise ValueError(
                 f"{type(self).__name__} requires labels for training")
 
-        return self._train(train_data, train_config, train_labels)
+        print(val_data.shape)
+        print(val_labels.shape)
+
+        return self._train(train_data, train_config=train_config, train_labels=train_labels, val_data=val_data, val_labels=val_labels)
 
     @abstractmethod
     def _train(
@@ -63,6 +70,8 @@ class ClassifierBase(ModelBase):
         train_data: TimeSeries,
         train_config=None,
         train_labels: Optional[TimeSeries] = None,
+        val_data: Optional[TimeSeries] = None,
+        val_labels: Optional[TimeSeries] = None,
     ) -> TimeSeries:
         """
         Core training logic. Must be implemented by subclasses.
@@ -180,10 +189,12 @@ class SupervisedClassifierBase(ClassifierBase):
         train_data: TimeSeries,
         train_config=None,
         train_labels: Optional[TimeSeries] = None,
+        val_data: Optional[TimeSeries] = None,
+        val_labels: Optional[TimeSeries] = None,
     ) -> TimeSeries:
         """Train with mandatory labels."""
         if train_labels is None:
             raise ValueError(
                 f"{type(self).__name__} is a supervised classifier and requires training labels"
             )
-        return super().train(train_data, train_config, train_labels)
+        return super().train(train_data, train_config=train_config, train_labels=train_labels, val_data=val_data, val_labels=val_labels)

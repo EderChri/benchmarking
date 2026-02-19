@@ -4,3 +4,4 @@ module: resize
 class: ResizeTransform
 params:
   target_length: 1024
+  axis: 1

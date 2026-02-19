@@ -226,7 +226,7 @@ class BenchmarkRunner:
 
                 print("Training model...")
                 model = self._train_model(
-                    configs["model"], run["task"], train_data, train_labels
+                    configs["model"], run["task"], train_data, train_labels, val_data, val_labels
                 )
                 print("Evaluating model...")
                 predictions = self.execute_task(run["task"], model, test_data)
@@ -463,12 +463,14 @@ class BenchmarkRunner:
         task: str,
         train_data: TimeSeries,
         train_labels: Optional[TimeSeries],
+        val_data: Optional[TimeSeries],
+        val_labels: Optional[TimeSeries],
     ) -> ModelBase:
         """Instantiate and train model"""
         model = self.instantiate(model_cfg, "models")
 
         if task in ["anomaly_detection", "anomaly", "classification"] and train_labels is not None:
-            model.train(train_data, train_labels=train_labels)
+            model.train(train_data, train_labels=train_labels, val_data=val_data, val_labels=val_labels)
         else:
             model.train(train_data)
 
@@ -634,5 +636,5 @@ class BenchmarkRunner:
 if __name__ == "__main__":
     print("Working dir:", os.getcwd())
 
-    runner = BenchmarkRunner(test_mode=True)
+    runner = BenchmarkRunner()
     runner.run_experiments()

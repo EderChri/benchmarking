@@ -1,4 +1,12 @@
 transforms:
+  - name: Resize
+    source: custom
+    module: resize
+    class: ResizeTransform
+    params:
+      target_length: 256
+      axis: 1
+
 
   - class: MeanVarNormalize
     module: normalize

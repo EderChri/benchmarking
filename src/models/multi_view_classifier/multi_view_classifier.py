@@ -36,9 +36,8 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         HashCheckpointModel.__init__(self, config, save_dir)
         if not hasattr(self, 'current_epoch'):
             self.current_epoch = 0
-        
-        self.device = self._get_device()
 
+        self.device = self._get_device()
 
         # Initialize encoder and classifier
         self.encoder = self._create_encoder().to(self.device)
@@ -52,6 +51,11 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             self.classifier.parameters(), lr=config.lr, weight_decay=config.weight_decay
         )
 
+        info_loss = losses.NTXentLoss(temperature=self.config.temperature)
+        self.info_criterion = losses.SelfSupervisedLoss(
+            info_loss, symmetric=True)
+        self.criterion = nn.CrossEntropyLoss()
+
         # Initialize gradient scaler for mixed precision
         self.scaler = GradScaler("cuda")
 
@@ -64,14 +68,14 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
     def require_univariate(self) -> bool:
         """Whether the model requires univariate time series."""
         return False
-    
+
     def train_post_process(self, train_result: TimeSeries) -> TimeSeries:
         """
         Post-process training results.
-        
+
         Args:
             train_result: Result from _train() method
-            
+
         Returns:
             Processed training result
         """
@@ -82,8 +86,10 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         """Transfer state from loaded model to current instance"""
         self.encoder.load_state_dict(loaded_model.encoder.state_dict())
         self.classifier.load_state_dict(loaded_model.classifier.state_dict())
-        self.encoder_optimizer.load_state_dict(loaded_model.encoder_optimizer.state_dict())
-        self.clf_optimizer.load_state_dict(loaded_model.clf_optimizer.state_dict())
+        self.encoder_optimizer.load_state_dict(
+            loaded_model.encoder_optimizer.state_dict())
+        self.clf_optimizer.load_state_dict(
+            loaded_model.clf_optimizer.state_dict())
         self.current_epoch = loaded_model.current_epoch
 
     def _get_device(self):
@@ -133,7 +139,8 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             state_dict = checkpoint
 
         # Remove 'module.' prefix if exists (from DataParallel)
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        state_dict = {k.replace("module.", ""): v for k,
+                      v in state_dict.items()}
 
         self.encoder.load_state_dict(state_dict, strict=False)
         print(f"Loaded pre-trained weights from {checkpoint_path}")
@@ -149,13 +156,15 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             for c in time_series.columns
             if not c.endswith("_derivative") and not c.endswith("_fft")
         ]
-        derivative_cols = [c for c in time_series.columns if c.endswith("_derivative")]
+        derivative_cols = [
+            c for c in time_series.columns if c.endswith("_derivative")]
         fft_cols = [c for c in time_series.columns if c.endswith("_fft")]
 
         # Extract data for each domain
         xt = time_series[original_cols].values if original_cols else np.zeros(
             (len(time_series), 1))
-        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(xt)
+        dx = time_series[derivative_cols].values if derivative_cols else np.zeros_like(
+            xt)
         xf = time_series[fft_cols].values if fft_cols else np.zeros_like(xt)
 
         if xt.ndim == 2:
@@ -222,36 +231,20 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
                     param.requires_grad = False
             self.classifier.train()
 
-    def _train_epoch(self, xt, dx, xf, labels):
-        """Train for one epoch"""
-        self._set_training_mode()
-
-        dataset = torch.utils.data.TensorDataset(
-            torch.FloatTensor(xt),
-            torch.FloatTensor(dx),
-            torch.FloatTensor(xf),
-            torch.LongTensor(labels),
-        )
-
-        loader = torch.utils.data.DataLoader(
-            dataset, batch_size=self.config.batch_size, shuffle=True, drop_last=True
-        )
-
-        info_loss = losses.NTXentLoss(temperature=self.config.temperature)
-        info_criterion = losses.SelfSupervisedLoss(info_loss, symmetric=True)
-        criterion = nn.CrossEntropyLoss()
+    def _train_epoch(self, loader):
+        """Modified to take a loader directly for reuse with val_loader"""
+        self.encoder.train()
+        if self.config.mode != "pretrain":
+            self.classifier.train()
 
         total_loss = 0.0
         total_loss_c = 0.0
         total_samples = 0
 
         for batch_xt, batch_dx, batch_xf, batch_y in loader:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            batch_xt = batch_xt.to(self.device)
-            batch_dx = batch_dx.to(self.device)
-            batch_xf = batch_xf.to(self.device)
-            batch_y = batch_y.to(self.device)
+            batch_xt, batch_dx, batch_xf, batch_y = [
+                b.to(self.device) for b in [batch_xt, batch_dx, batch_xf, batch_y]
+            ]
 
             # Create augmented versions
             batch_xt_aug, batch_dx_aug, batch_xf_aug = self._augment_data(
@@ -263,104 +256,147 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
                 self.clf_optimizer.zero_grad()
 
             with autocast("cuda", enabled=True):
-                # Forward pass - original
-                ht, hd, hf, zt, zd, zf = self.encoder(batch_xt, batch_dx, batch_xf)
+                # Forward passes
+                ht, hd, hf, zt, zd, zf = self.encoder(
+                    batch_xt, batch_dx, batch_xf)
+                _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(
+                    batch_xt_aug, batch_dx_aug, batch_xf_aug)
 
-                # Forward pass - augmented
-                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = self.encoder(
-                    batch_xt_aug, batch_dx_aug, batch_xf_aug
-                )
-                # Explicitly delete unused tensors
-                del ht_aug, hd_aug, hf_aug
+                # Contrastive losses
+                loss_t = self.info_criterion(zt, zt_aug)
+                loss_d = self.info_criterion(zd, zd_aug)
+                loss_f = self.info_criterion(zf, zf_aug)
 
-                # Contrastive loss for each domain
-                loss_t = info_criterion(zt, zt_aug)
-                loss_d = info_criterion(zd, zd_aug)
-                loss_f = info_criterion(zf, zf_aug)
+                loss = self._compute_loss_by_type(loss_t, loss_d, loss_f) + \
+                    self._weight_regularization(self.encoder)
 
-                # Combined contrastive loss
-                loss = self._compute_loss_by_type(
-                    loss_t, loss_d, loss_f) + self._weight_regularization(self.encoder)
-                
-                # Supervised classification loss
+                loss_c_val = 0.0
                 if self.config.mode != "pretrain":
-                    if self.config.feature == "latent":
-                        logits = self.classifier(zt, zd, zf)
-                    else:
-                        logits = self.classifier(ht, hd, hf)
-
-                    loss_c = criterion(logits, batch_y.long())
+                    logits = self.classifier(
+                        zt, zd, zf) if self.config.feature == "latent" else self.classifier(ht, hd, hf)
+                    loss_c = nn.CrossEntropyLoss()(logits, batch_y.long())
                     loss = self.config.lam * loss + loss_c + \
                         self._weight_regularization(self.classifier)
+                    loss_c_val = loss_c.item()
 
-                    total_loss_c += loss_c.item() * batch_xt.size(0)
-
-            # Backward pass
             self.scaler.scale(loss).backward()
-
-            # Optimizer step
-            if self.config.mode != "freeze":
-                self.scaler.step(self.encoder_optimizer)
-
+            self.scaler.step(self.encoder_optimizer)
             if self.config.mode != "pretrain":
                 self.scaler.step(self.clf_optimizer)
-
             self.scaler.update()
 
             total_loss += loss.item() * batch_xt.size(0)
+            total_loss_c += loss_c_val * batch_xt.size(0)
             total_samples += batch_xt.size(0)
 
-        avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
-        avg_loss_c = total_loss_c / total_samples if total_samples > 0 else 0.0
+        return total_loss / total_samples, total_loss_c / total_samples
 
-        return avg_loss, avg_loss_c
+    def _validate(self, loader):
+        """Evaluation loop for validation set mirroring training logic."""
+        self.encoder.eval()
+        self.classifier.eval()
 
-    def _train(
-        self,
-        train_data: TimeSeries,
-        train_config=None,
-        train_labels: Optional[TimeSeries] = None,
-    ) -> TimeSeries:
-        """Core training method called by DetectorBase.train()."""
-        if train_labels is None:
-            raise ValueError("MultiDomainClassifier requires labels for training")
+        val_loss = 0.0
+        total_samples = 0
 
-        # Extract domains
-        xt, dx, xf = self._extract_domains(train_data)
-        labels = train_labels.to_pd().values.flatten()
+        with torch.no_grad():
+            for batch_xt, batch_dx, batch_xf, batch_y in loader:
+                batch_xt, batch_dx, batch_xf, batch_y = [
+                    b.to(self.device) for b in [batch_xt, batch_dx, batch_xf, batch_y]
+                ]
 
-        print(
-            f"After extraction: xt={xt.shape}, dx={dx.shape}, xf={xf.shape}, labels={labels.shape}")
-        assert xt.shape[0] == dx.shape[0] == xf.shape[0] == len(labels), \
-            f"Shape mismatch: xt={xt.shape[0]}, dx={dx.shape[0]}, xf={xf.shape[0]}, labels={len(labels)}"
-
-        print(f"Training MultiDomainClassifier for {self.config.num_epochs} epochs...")
-        print(f"Mode: {self.config.mode}, Loss type: {self.config.loss_type}")
-        best_loss = float('inf')
-        
-        start_epoch = self.current_epoch
-        if start_epoch != 0:
-            print(f"Resuming training from last checkpoint at epoch {start_epoch+1}")
-            start_epoch += 1
-        # Training loop
-        for epoch in range(start_epoch, self.config.num_epochs):
-            self.current_epoch = epoch
-            avg_loss, avg_loss_c = self._train_epoch(xt, dx, xf, labels)
-            
-            if avg_loss < best_loss or (epoch + 1) % 50 == 0:
-                if avg_loss < best_loss:
-                    best_loss = avg_loss
-                self.save(save_config=True)
-
-            if self.config.mode == "pretrain":
-                print(f"Epoch {epoch+1}/{self.config.num_epochs}, Loss: {avg_loss:.4f}")
-            else:
-                print(
-                    f"Epoch {epoch+1}/{self.config.num_epochs}, "
-                    f"Loss: {avg_loss:.4f}, Loss_c: {avg_loss_c:.4f}"
+                # 1. Create augmented versions for contrastive validation
+                batch_xt_aug, batch_dx_aug, batch_xf_aug = self._augment_data(
+                    batch_xt, batch_dx, batch_xf
                 )
 
-        # Return classification scores on training data
+                # 2. Forward pass with mixed precision (consistent with _train_epoch)
+                with autocast("cuda", enabled=True):
+                    # Original and Augmented forward passes
+                    ht, hd, hf, zt, zd, zf = self.encoder(
+                        batch_xt, batch_dx, batch_xf)
+                    _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(
+                        batch_xt_aug, batch_dx_aug, batch_xf_aug
+                    )
+
+                    # 3. Calculate Contrastive Losses using self.info_criterion
+                    loss_t = self.info_criterion(zt, zt_aug)
+                    loss_d = self.info_criterion(zd, zd_aug)
+                    loss_f = self.info_criterion(zf, zf_aug)
+
+                    # 4. Combine domain losses using the helper method
+                    loss = self._compute_loss_by_type(loss_t, loss_d, loss_f) + \
+                        self._weight_regularization(self.encoder)
+
+                    # 5. Add Supervised loss if not in pretrain mode
+                    if self.config.mode != "pretrain":
+                        logits = self.classifier(
+                            zt, zd, zf) if self.config.feature == "latent" else self.classifier(ht, hd, hf)
+                        loss_c = self.criterion(logits, batch_y.long())
+                        loss = self.config.lam * loss + loss_c + \
+                            self._weight_regularization(self.classifier)
+
+                val_loss += loss.item() * batch_xt.size(0)
+                total_samples += batch_xt.size(0)
+
+        # Avoid division by zero if loader is empty
+        return val_loss / total_samples if total_samples > 0 else 0.0
+
+    def _train(self, train_data, train_config, train_labels, val_data=None, val_labels=None):
+        # 1. Prepare DataLoaders
+        xt, dx, xf = self._extract_domains(train_data)
+        y_train = train_labels.to_pd().values.flatten()
+        train_loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(torch.FloatTensor(xt), torch.FloatTensor(dx),
+                                           torch.FloatTensor(xf), torch.LongTensor(y_train)),
+            batch_size=self.config.batch_size, shuffle=True
+        )
+
+        val_loader = None
+        if val_data is not None:
+            v_xt, v_dx, v_xf = self._extract_domains(val_data)
+            y_val = val_labels.to_pd().values.flatten()
+            val_loader = torch.utils.data.DataLoader(
+                torch.utils.data.TensorDataset(torch.FloatTensor(v_xt), torch.FloatTensor(v_dx),
+                                               torch.FloatTensor(v_xf), torch.LongTensor(y_val)),
+                batch_size=self.config.batch_size, shuffle=False
+            )
+
+        # 2. Setup Scheduler & Early Stopping
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.encoder_optimizer, mode='min', factor=0.5, patience=10
+        )
+        early_stop_counter = 0
+        best_val_loss = float('inf')
+
+        # 3. Training Loop
+        for epoch in range(self.config.num_epochs):
+            self.current_epoch = epoch
+            train_loss, train_loss_c = self._train_epoch(train_loader)
+
+            # Validation Step
+            current_val_loss = self._validate(
+                val_loader) if val_loader else train_loss
+
+            # Step Scheduler
+            scheduler.step(current_val_loss)
+
+            print(
+                f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {current_val_loss:.4f}")
+
+            # Early Stopping & Saving
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                early_stop_counter = 0
+                self.save(save_config=True)  # Save best model
+                print(f"  --> Best model saved (Loss: {best_val_loss:.4f})")
+            else:
+                early_stop_counter += 1
+
+            if early_stop_counter >= self.config.patience:
+                print(f"Early stopping triggered at epoch {epoch+1}")
+                break
+
         return self.get_classification_score(TimeSeries.from_pd(train_data))
 
     def _get_classification_score(
@@ -370,7 +406,7 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
     ) -> TimeSeries:
         """
         Get classification probability for a single sequence.
-        
+
         Returns probability of positive class, broadcast to all timestamps.
         """
         self.encoder.eval()
@@ -378,57 +414,56 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
 
         xt, dx, xf = self._extract_domains(time_series)
         num_patients = xt.shape[0]
-        seq_len = xt.shape[1]
-        print(f"Processing {num_patients} patients with seq_len={seq_len}")
-    
+
         # Process in smaller batches to avoid OOM
         inference_batch_size = 16  # Or smaller if still OOM
         all_scores = []
-        
+
         with torch.no_grad():
             for i in range(0, num_patients, inference_batch_size):
                 end_idx = min(i + inference_batch_size, num_patients)
-                
+
                 # Get batch of patients
                 xt_batch = torch.FloatTensor(xt[i:end_idx]).to(self.device)
                 dx_batch = torch.FloatTensor(dx[i:end_idx]).to(self.device)
                 xf_batch = torch.FloatTensor(xf[i:end_idx]).to(self.device)
-                
+
                 # Forward pass
-                ht, hd, hf, zt, zd, zf = self.encoder(xt_batch, dx_batch, xf_batch)
-                
+                ht, hd, hf, zt, zd, zf = self.encoder(
+                    xt_batch, dx_batch, xf_batch)
+
                 if self.config.feature == "latent":
                     logits = self.classifier(zt, zd, zf)
                 else:
                     logits = self.classifier(ht, hd, hf)
-                
+
                 probs = torch.softmax(logits, dim=-1)
-                
+
                 # Get scores for this batch
                 if probs.shape[1] > 1:
                     batch_scores = probs[:, 1].cpu().numpy()
                 else:
                     batch_scores = probs[:, 0].cpu().numpy()
-                
+
                 all_scores.append(batch_scores)
-                
+
                 # Clean up
                 del xt_batch, dx_batch, xf_batch, ht, hd, hf, zt, zd, zf, logits, probs
-                
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        
+
         # Concatenate all batch scores
         scores_np = np.concatenate(all_scores)  # [num_patients]
-        
+
         score_df = pd.DataFrame(
             scores_np.reshape(-1, 1),
             index=time_series.to_pd().index,
             columns=["class_score"]
         )
-        
+
         return TimeSeries.from_pd(score_df)
-        
+
     def _predict(
         self,
         time_series: TimeSeries,
@@ -436,7 +471,7 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
     ) -> TimeSeries:
         """
         Predict class labels for sequences.
-        
+
         Returns:
             TimeSeries with predicted class for each patient
         """
@@ -444,48 +479,46 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         self.classifier.eval()
 
         xt, dx, xf = self._extract_domains(time_series)
-        
-        
+
         # Handle batch of patients
         num_patients = xt.shape[0]
-        
+
         # Process in batches
         inference_batch_size = 16
         all_predictions = []
-        
+
         with torch.no_grad():
             for i in range(0, num_patients, inference_batch_size):
                 end_idx = min(i + inference_batch_size, num_patients)
-                
+
                 xt_batch = torch.FloatTensor(xt[i:end_idx]).to(self.device)
                 dx_batch = torch.FloatTensor(dx[i:end_idx]).to(self.device)
                 xf_batch = torch.FloatTensor(xf[i:end_idx]).to(self.device)
-                
-                ht, hd, hf, zt, zd, zf = self.encoder(xt_batch, dx_batch, xf_batch)
-                
+
+                ht, hd, hf, zt, zd, zf = self.encoder(
+                    xt_batch, dx_batch, xf_batch)
+
                 if self.config.feature == "latent":
                     logits = self.classifier(zt, zd, zf)
                 else:
                     logits = self.classifier(ht, hd, hf)
-                
+
                 predictions = logits.argmax(dim=-1).cpu().numpy()
                 all_predictions.append(predictions)
-                
+
                 del xt_batch, dx_batch, xf_batch, ht, hd, hf, zt, zd, zf, logits
-            
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        
+
         # Concatenate predictions
         predictions_np = np.concatenate(all_predictions)
-        
+
         # Return as TimeSeries with same index as input
         pred_df = pd.DataFrame(
             predictions_np.reshape(-1, 1),
             index=time_series.to_pd().index,
             columns=["prediction"]
         )
-        
+
         return TimeSeries.from_pd(pred_df)
-
-

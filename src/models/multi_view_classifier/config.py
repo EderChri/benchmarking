@@ -24,6 +24,7 @@ class MultiViewClassifierConfig(DetectorConfig):
         num_epochs: int = 10,
         lr: float = 0.001,
         weight_decay: float = 0.01,
+        patience: int = 20,
         l1_scale: float = 0.0,
         l2_scale: float = 0.01,
         
@@ -63,6 +64,7 @@ class MultiViewClassifierConfig(DetectorConfig):
         
         self.batch_size = batch_size
         self.num_epochs = num_epochs
+        self.patience = patience
         self.lr = lr
         self.weight_decay = weight_decay
         self.l1_scale = l1_scale
