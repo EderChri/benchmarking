@@ -20,12 +20,13 @@ runs:
   #   metrics: ["rmse", "smape", "mae"]
   
     # --- Experiment 3: Simple ARIMA on EnergyPower ---
-  # - name: "ARIMA_EnergyPower_Baseline"
-  #   task: "forecasting"
-  #   data: "energy_power"      # References conf/data/energy_power.yaml
-  #   model: "arima"         # References conf/models/arima.yaml
-  #   preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
-  #   metrics: ["rmse", "smape", "mae"]
+  - name: "ARIMA_EnergyPower_Baseline"
+    id: 0
+    task: "forecasting"
+    data: "energy_power"      # References conf/data/energy_power.yaml
+    model: "arima"         # References conf/models/arima.yaml
+    preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
+    metrics: ["rmse", "smape", "mae"]
 
   #--- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
   # - name: "DF_M4_MovingAverage"
@@ -36,10 +37,28 @@ runs:
   #   metrics: ["rmse", "smape", "mae"]
 
     # --- Test all datasets ---
-  - name: "Test_1 ECG"
-    task: "classification"
-    data: "ecg"
-    model: "multi_view_classifier"
-    target: 1
-    preprocessor: "multi_view_contrastive"
-    metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1"]
+  # - id: 1
+  #   name: "Pretrain ECG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "ecg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   preprocessor: "resize"
+  #   metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1", "confusion_matrix", "normalized_confusion_matrix"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         num_epochs: 10
+
+  # - id: 2
+  #   name: "Pretrain SleepEEG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   preprocessor: "resize"
+  #   metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1", "confusion_matrix", "normalized_confusion_matrix"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         num_epochs: 10

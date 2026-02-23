@@ -2,6 +2,10 @@ from loaders.base_loader import BaseDataLoader, register_loader
 from merlion.utils import TimeSeries
 import pandas as pd
 from datetime import datetime
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 @register_loader("energy_power")
 class EnergyPowerDatasetLoader(BaseDataLoader):
@@ -9,7 +13,9 @@ class EnergyPowerDatasetLoader(BaseDataLoader):
         file_path = self.config.get('file_path')
         target_column = self.config.get('target_column', 'Global_active_power')
         
+        start = time.time()
         df = pd.read_csv(file_path, na_values='?')
+        logger.info(f"Loaded raw data from {file_path} in {time.time() - start:.2f} seconds")
         
         # Combine Date and Time columns into a single Datetime column
         df['Datetime'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], dayfirst=True)

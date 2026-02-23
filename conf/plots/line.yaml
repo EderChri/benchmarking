@@ -1,0 +1,6 @@
+name: LinePlot
+module: plots.line_plot
+class: LinePlot
+params:
+  figsize: [12, 5]
+  alpha: 0.8

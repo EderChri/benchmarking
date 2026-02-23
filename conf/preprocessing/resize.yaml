@@ -3,5 +3,5 @@ source: custom
 module: resize
 class: ResizeTransform
 params:
-  target_length: 1024
+  target_length: 256
   axis: 1

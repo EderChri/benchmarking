@@ -13,8 +13,9 @@ params:
   dropout: 0.1
   
   # Training
-  batch_size: 16
+  batch_size: 128
   num_epochs: 200
+  patience: 20
   lr: 0.001
   weight_decay: 0.00001
   l1_scale: 0.0

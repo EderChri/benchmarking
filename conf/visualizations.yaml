@@ -1,0 +1,7 @@
+experiments:
+  - plot_type: "line"
+    runs: [1]
+
+  - plot_type: "point"
+    runs: [1]
+  

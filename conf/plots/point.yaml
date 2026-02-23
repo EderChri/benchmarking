@@ -1,0 +1,7 @@
+name: PointPlot
+module: plots.point_plot
+class: PointPlot
+params:
+  figsize: [12, 5]
+  alpha: 0.8
+  marker_size: 4

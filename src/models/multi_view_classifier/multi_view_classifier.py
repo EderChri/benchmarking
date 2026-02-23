@@ -11,6 +11,10 @@ from pytorch_metric_learning import losses
 
 from .model import Encoder, Classifier
 from models.hash_checkpoint_model import HashCheckpointModel
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
@@ -143,7 +147,7 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
                       v in state_dict.items()}
 
         self.encoder.load_state_dict(state_dict, strict=False)
-        print(f"Loaded pre-trained weights from {checkpoint_path}")
+        logger.info(f"Loaded pre-trained weights from {checkpoint_path}")
 
     def _extract_domains(self, time_series: pd.DataFrame):
         """Extract time, derivative, and frequency domains from dataframe"""
@@ -370,8 +374,7 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         best_val_loss = float('inf')
 
         # 3. Training Loop
-        for epoch in range(self.config.num_epochs):
-            self.current_epoch = epoch
+        for epoch in range(self.current_epoch, self.config.num_epochs):
             train_loss, train_loss_c = self._train_epoch(train_loader)
 
             # Validation Step
@@ -381,20 +384,22 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             # Step Scheduler
             scheduler.step(current_val_loss)
 
-            print(
+            logger.info(
                 f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {current_val_loss:.4f}")
 
             # Early Stopping & Saving
             if current_val_loss < best_val_loss:
                 best_val_loss = current_val_loss
                 early_stop_counter = 0
+                self.current_epoch = epoch + 1
+
                 self.save(save_config=True)  # Save best model
-                print(f"  --> Best model saved (Loss: {best_val_loss:.4f})")
+                logger.info(f"  --> Best model saved (Loss: {best_val_loss:.4f})")
             else:
                 early_stop_counter += 1
 
             if early_stop_counter >= self.config.patience:
-                print(f"Early stopping triggered at epoch {epoch+1}")
+                logger.info(f"Early stopping triggered at epoch {epoch+1}")
                 break
 
         return self.get_classification_score(TimeSeries.from_pd(train_data))
