@@ -80,8 +80,14 @@ class BenchmarkRunner:
         evaluator = MetricEvaluator(self.factory)
         all_results = []
 
-        for run_id, run in enumerate(exp_config["runs"], start=1):
+        for run in exp_config["runs"]:
+            run_id = run["id"]
             logger.info(f"[Run {run_id}] {run['name']} — {run['task']}")
+            if rm.run_exists(run_id):
+                logger.info(f"[Run {run_id}] already exists, skipping")
+                all_results.append(rm.load_run(run_id))
+                continue
+
             start = time.time()
             try:
                 configs = self._apply_overrides(self._load_run_configs(run), run)
@@ -142,4 +148,4 @@ class BenchmarkRunner:
 if __name__ == "__main__":
     runner = BenchmarkRunner(test_mode=True, use_cache=True)
     results_dir = runner.run_experiments()
-    runner.visualise(results_dir)  # uncomment to visualise after run
+    #runner.visualise(results_dir)  # uncomment to visualise after run
