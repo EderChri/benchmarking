@@ -92,6 +92,7 @@ class BenchmarkRunner:
             try:
                 configs = self._apply_overrides(self._load_run_configs(run), run)
                 splits = self.pipeline.get_data(run, configs)
+                logger.info(f"[Run {run_id}] Data loaded and preprocessed. Training model...")
                 self.factory.current_cache_key = self.pipeline.cache.cache_key if self.pipeline.cache else None
                 pretrained_save_dir = None
                 pretrained_config_path = None

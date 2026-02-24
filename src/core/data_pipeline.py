@@ -23,6 +23,7 @@ class DataPipeline:
         loader_cls = LOADER_REGISTRY[configs["data"].get("source", "custom")]
         loader = loader_cls(configs["data"], configs["data"].get("test_split_ratio", 0.2), test_mode=self.test_mode)
         splits = self._parse_raw(loader.load())
+        logger.info(f"Raw data loaded. Preprocessing with {run['preprocessor']}...")
         splits = self._apply_transforms(configs["preprocessing"], splits)
         if self.cache:
             self.cache.save(configs["data"], configs["preprocessing"], run["task"], splits, configs.get("target"))

@@ -1,10 +1,13 @@
 from abc import abstractmethod
+import logging
 from typing import Optional, Union, Tuple
 from models.classifier_base.config import ClassifierConfig
 import pandas as pd
 from merlion.utils import TimeSeries, UnivariateTimeSeries
 from merlion.models.base import ModelBase, Config
 
+
+logger = logging.getLogger(__name__)
 
 class ClassifierBase(ModelBase):
     """
@@ -58,9 +61,10 @@ class ClassifierBase(ModelBase):
         if train_labels is None:
             raise ValueError(
                 f"{type(self).__name__} requires labels for training")
+        
+        logger.info(f"Training {type(self).__name__} with {len(train_data)} training samples and "
+                    f"{len(val_data) if val_data is not None else 0} validation samples...")
 
-        print(val_data.shape)
-        print(val_labels.shape)
 
         return self._train(train_data, train_config=train_config, train_labels=train_labels, val_data=val_data, val_labels=val_labels)
 

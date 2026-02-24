@@ -1,0 +1,14 @@
+source: ran
+file_path: src/data/ran_2025/ran_2025.csv
+datetime_column: period_start_time
+label_column: sector          # omit if unsupervised
+keep_columns:               # omit to use all columns
+  - sector # Needed for classification target
+  - dl_gb
+  - ul_gb
+  - prb_load_dl
+  - prb_load_ul
+sector_column: sector
+target_sectors: [S7007X1, S3254X2, J3450X3, J5127X1]
+test_split_ratio: 0.2
+validation_split_ratio: 0.1

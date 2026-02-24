@@ -48,7 +48,7 @@ class ResultsManager:
     def save_run(self, run_id: int, exp_name: str, results: Dict, predictions=None,
                  test_data=None, status: str = "success", error: str = None,
                  runtime: float = None, run_cfg: Dict = None,
-                 save_dir: str = None, config_hash: str = None) -> Dict:
+                 save_dir: str = None, config_hash: str = None,) -> Dict:
         run_dir = self.results_dir / str(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -66,7 +66,8 @@ class ResultsManager:
         if test_data is not None:
             with open(run_dir / "test_data.pkl", "wb") as f:
                 pickle.dump(test_data, f)
-        self._update_index(run_id, run_dir)
+        if status == "success":
+            self._update_index(run_id, run_dir)
         return run_result
 
     def save_summary(self, all_results: list):
