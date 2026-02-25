@@ -25,7 +25,7 @@ params:
   loss_type: 'ALL'  # 'ALL', 'TDF', 'TD', 'TF', 'DF', 'T', 'D', 'F'
   feature: 'latent'  # 'latent' or 'hidden'
   temperature: 0.07
-  lam: 0.0
+  lam: 0.1
   
   # Mode
   mode: 'pretrain'  # 'pretrain', 'finetune', 'freeze'

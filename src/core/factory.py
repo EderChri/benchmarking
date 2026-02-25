@@ -4,6 +4,9 @@ from models.model_checkpoint import load_model_if_exists
 import yaml
 from pathlib import Path
 from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ComponentFactory:
     def __init__(self, config_dir: Path):
@@ -44,7 +47,7 @@ class ComponentFactory:
         module = importlib.import_module(f"metrics.{config['module']}")
         return getattr(module, config["class"])(**config.get("params", {}))
 
-    def _instantiate_model(self, config: Dict[str, Any], pretrained_save_dir=None, pretrained_config_path=None):
+    def _instantiate_model(self, config: Dict[str, Any], pretrained_save_dir=None, pretrained_config_path=None, pretrained_run_id=None):
         module_path = f"merlion.models.{config['module']}" if config.get("source") == "merlion" else config["module"]
         module = importlib.import_module(module_path)
         model_cls = getattr(module, config["class"])
@@ -54,9 +57,12 @@ class ComponentFactory:
 
         # Try loading existing checkpoint first (works for ALL models)
         existing = load_model_if_exists(model_cls, save_dir, config)
-        if existing is not None:
-            print("Successfully resumed from existing checkpoint")
-            return existing
+        if existing is not None and pretrained_run_id is None:
+            logger.info("Successfully resumed from existing checkpoint")
+            return existing, True
+        elif existing is not None:
+            logger.info("Using existing pretrained model from other run for new run")
+            return existing, False
 
         # Instantiate fresh — inject extra kwargs only for HashCheckpointModel subclasses
         import inspect
@@ -65,9 +71,9 @@ class ComponentFactory:
             extra = {}
             if "pretrained_config_path" in inspect.signature(model_cls.__init__).parameters:
                 extra["pretrained_config_path"] = pretrained_config_path
-            return model_cls(model_config, save_dir=save_dir, **extra)
+            return model_cls(model_config, save_dir=save_dir, **extra), False
 
-        return model_cls(model_config)
+        return model_cls(model_config), False
 
     
     def _instantiate_plot(self, config: Dict[str, Any]):

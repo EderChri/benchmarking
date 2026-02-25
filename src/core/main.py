@@ -96,27 +96,29 @@ class BenchmarkRunner:
                 self.factory.current_cache_key = self.pipeline.cache.cache_key if self.pipeline.cache else None
                 pretrained_save_dir = None
                 pretrained_config_path = None
-                skip_training = False
-
+    
                 if pretrained_run_id := run.get("pretrained_run"):
                     prior = rm.load_run(pretrained_run_id)
                     pretrained_save_dir = prior.get("save_dir")
-                    skip_training = True
                     if pretrained_model := run.get("pretrained_model"):
                         pretrained_config_path = str(self.config_dir / "models" / f"{pretrained_model}.yaml")
 
-                model = self.factory._instantiate_model(
+                model, existing = self.factory._instantiate_model(
                     configs["model"],
                     pretrained_save_dir=pretrained_save_dir,
                     pretrained_config_path=pretrained_config_path,
+                    pretrained_run_id=pretrained_run_id
                 )
+                if pretrained_run_id:
+                    model.current_epoch = 0  # ensure epoch starts at 0 for pretrained runs
 
-                if not skip_training:
+                if not existing:
                     model = self.executor.train(model, run["task"], splits)
 
                 # Save non-HashCheckpointModel models (HashCheckpointModel saves internally during train)
                 save_dir = f"src/data/.cache/{self.factory.current_cache_key}"
-                if not isinstance(model, HashCheckpointModel) and not skip_training:
+                if not isinstance(model, HashCheckpointModel) and not existing:
+
                     save_model(model, save_dir, configs["model"])
 
                 predictions = self.executor.predict(run["task"], model, splits.test_data)
@@ -147,6 +149,6 @@ class BenchmarkRunner:
 
 
 if __name__ == "__main__":
-    runner = BenchmarkRunner(test_mode=True, use_cache=True)
+    runner = BenchmarkRunner(test_mode=False, use_cache=True)
     results_dir = runner.run_experiments()
     #runner.visualise(results_dir)  # uncomment to visualise after run
