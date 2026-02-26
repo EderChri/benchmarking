@@ -1,5 +1,6 @@
 name: Precision
-source: merlion
-module: anomaly
-class: TSADMetric
-metric_name: Precision
+source: custom
+module: precision
+class: Precision
+params:
+  average: weighted

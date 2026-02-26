@@ -58,19 +58,43 @@ class BenchmarkRunner:
         target = run.get("target")
         if target is not None:
             model_cfg["params"]["target_seq_index"] = target
-        return {"data": data_cfg, "model": model_cfg, "preprocessing": preproc_cfg,
-                "metrics": run["metrics"], "target": target}
+
+        # Normalize flat metrics list into per-metric config dict
+        metric_names = run.get("metrics", [])
+        metric_configs = {}
+        for name in metric_names:
+            base_cfg = self.factory.get_component_by_name(name, "metrics")
+            metric_configs[name] = base_cfg
+
+        return {
+            "data": data_cfg,
+            "model": model_cfg,
+            "preprocessing": preproc_cfg,
+            "metrics": metric_names,          
+            "metric_configs": metric_configs,  
+            "target": target,
+        }
+
 
     def _apply_overrides(self, configs: Dict, run: Dict) -> Dict:
         for config_type, params in run.get("overrides", {}).items():
-            if config_type not in configs:
-                continue
-            for key, value in params.items():
-                if isinstance(value, dict) and key in configs[config_type]:
-                    configs[config_type][key].update(value)
-                else:
-                    configs[config_type][key] = value
+            if config_type == "metrics":
+                for metric_name, metric_overrides in params.items():
+                    if metric_name in configs["metric_configs"]:
+                        configs["metric_configs"][metric_name].update(metric_overrides)
+                    else:
+                        configs["metric_configs"][metric_name] = metric_overrides
+            else:
+                if config_type not in configs:
+                    continue
+                for key, value in params.items():
+                    if isinstance(value, dict) and key in configs[config_type]:
+                        configs[config_type][key].update(value)
+                    else:
+                        configs[config_type][key] = value
         return configs
+
+
 
     def run_experiments(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -122,7 +146,17 @@ class BenchmarkRunner:
                     save_model(model, save_dir, configs["model"])
 
                 predictions = self.executor.predict(run["task"], model, splits.test_data)
-                results = evaluator.evaluate(configs["metrics"], run["task"], splits, predictions)
+                prediction_scores = None
+                if run["task"].lower() == "classification":
+                    prediction_scores = self.executor.classification_scores(model, splits.test_data)
+                results = evaluator.evaluate(
+                    configs["metrics"],
+                    run["task"],
+                    splits,
+                    predictions,
+                    metric_configs=configs.get("metric_configs"),
+                    prediction_scores=prediction_scores,
+                )
                 run_result = rm.save_run(
                     run_id, run["name"], results,
                     predictions=predictions,

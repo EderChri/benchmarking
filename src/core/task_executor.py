@@ -33,3 +33,8 @@ class TaskExecutor:
 
     def _classify(self, model, test_data):
         return model.predict(test_data)
+
+    def classification_scores(self, model: ModelBase, test_data: TimeSeries):
+        if hasattr(model, "get_classification_score"):
+            return model.get_classification_score(test_data)
+        return None

@@ -20,13 +20,13 @@ runs:
   #   metrics: ["rmse", "smape", "mae"]
   
     # --- Experiment 3: Simple ARIMA on EnergyPower ---
-  - name: "ARIMA_EnergyPower_Baseline"
-    id: 0
-    task: "forecasting"
-    data: "energy_power"      # References conf/data/energy_power.yaml
-    model: "arima"         # References conf/models/arima.yaml
-    preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
-    metrics: ["rmse", "smape", "mae"]
+  # - name: "ARIMA_EnergyPower_Baseline"
+  #   id: 0
+  #   task: "forecasting"
+  #   data: "energy_power"      # References conf/data/energy_power.yaml
+  #   model: "arima"         # References conf/models/arima.yaml
+  #   preprocessor: "no_preproc" # References conf/preprocessor/no_preproc.yaml
+  #   metrics: ["rmse", "smape", "mae"]
 
   #--- Experiment 2: DefaultForecaster on M4 with Lagged Features ---
   # - name: "DF_M4_MovingAverage"
@@ -38,27 +38,75 @@ runs:
 
     # --- Test all datasets ---
   # - id: 1
-  #   name: "Pretrain ECG_MultiViewClassifier"
+  #   name: "Pretrain SleepEEG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1", "confusion_matrix", "normalized_confusion_matrix"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         num_epochs: 200
+
+  # - id: 2
+  #   name: "Finetune ECG_MultiViewClassifier"
   #   task: "classification"
   #   data: "ecg"
   #   model: "multi_view_classifier"
   #   target: 1
-  #   preprocessor: "resize"
+  #   pretrained_run: 1
+  #   skip_training: False
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1", "confusion_matrix", "normalized_confusion_matrix"]
+  #   overrides:
+  #     model:
+  #       params:
+  #          mode: 'finetune'
+
+  # - id: 3
+  #   name: "Ran2025_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "ran_2025"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   preprocessor: "multi_view_contrastive"
   #   metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1", "confusion_matrix", "normalized_confusion_matrix"]
   #   overrides:
   #     model:
   #       params:
   #         num_epochs: 10
 
-  # - id: 2
-  #   name: "Pretrain SleepEEG_MultiViewClassifier"
-  #   task: "classification"
-  #   data: "sleep_eeg"
-  #   model: "multi_view_classifier"
-  #   target: 1
-  #   preprocessor: "resize"
-  #   metrics: ["precision", "recall", "f1", "pointwise_precision", "pointwise_recall", "pointwise_f1", "confusion_matrix", "normalized_confusion_matrix"]
-  #   overrides:
-  #     model:
-  #       params:
-  #         num_epochs: 10
+  - id: 4
+    name: "Pretrain SleepEEG_MultiViewClassifier"
+    task: "classification"
+    data: "sleep_eeg"
+    model: "multi_view_classifier"
+    target: 1
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          num_epochs: 1
+
+  - id: 5
+    name: "Finetune ECG_MultiViewClassifier"
+    task: "classification"
+    data: "ecg"
+    model: "multi_view_classifier"
+    target: 1
+    pretrained_run: 1
+    skip_training: False
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+           num_epochs: 1
+           mode: "finetune"
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 4

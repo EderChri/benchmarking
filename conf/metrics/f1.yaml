@@ -1,5 +1,6 @@
 name: F1
-source: merlion
-module: anomaly
-class: TSADMetric
-metric_name: F1
+source: custom
+module: f1
+class: F1
+params:
+  average: weighted

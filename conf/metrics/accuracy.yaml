@@ -1,0 +1,4 @@
+name: Accuracy
+source: custom
+module: accuracy
+class: Accuracy

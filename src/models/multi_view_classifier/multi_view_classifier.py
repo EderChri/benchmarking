@@ -410,9 +410,9 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         time_series_prev: Optional[TimeSeries] = None,
     ) -> TimeSeries:
         """
-        Get classification probability for a single sequence.
+        Get classification probabilities for each class.
 
-        Returns probability of positive class, broadcast to all timestamps.
+        Returns class probabilities for each sequence.
         """
         self.encoder.eval()
         self.classifier.eval()
@@ -444,11 +444,7 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
 
                 probs = torch.softmax(logits, dim=-1)
 
-                # Get scores for this batch
-                if probs.shape[1] > 1:
-                    batch_scores = probs[:, 1].cpu().numpy()
-                else:
-                    batch_scores = probs[:, 0].cpu().numpy()
+                batch_scores = probs.cpu().numpy()
 
                 all_scores.append(batch_scores)
 
@@ -458,13 +454,17 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        # Concatenate all batch scores
-        scores_np = np.concatenate(all_scores)  # [num_patients]
+        # Concatenate all batch scores -> [num_patients, num_classes]
+        scores_np = np.concatenate(all_scores, axis=0)
 
+        if scores_np.ndim == 1:
+            scores_np = scores_np.reshape(-1, 1)
+
+        class_cols = [f"class_score_{i}" for i in range(scores_np.shape[1])]
         score_df = pd.DataFrame(
-            scores_np.reshape(-1, 1),
+            scores_np,
             index=time_series.to_pd().index,
-            columns=["class_score"]
+            columns=class_cols,
         )
 
         return TimeSeries.from_pd(score_df)

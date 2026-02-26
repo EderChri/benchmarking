@@ -1,0 +1,6 @@
+name: AUROC/AUPRC
+source: custom
+module: auroc_auprc
+class: AUROCAUPRC
+params:
+  num_classes: 2

@@ -1,5 +1,6 @@
 name: Recall
-source: merlion
-module: anomaly
-class: TSADMetric
-metric_name: Recall
+source: custom
+module: recall
+class: Recall
+params:
+  average: weighted
