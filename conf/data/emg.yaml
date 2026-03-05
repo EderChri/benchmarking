@@ -1,4 +1,5 @@
 name: EMG
-source: torch_dataset
+source: multi_view_dataset
 dataset_dir: "src/data/EMG"
+file_name: "_DA_EMG_256_00.pkl"
 has_labels: true

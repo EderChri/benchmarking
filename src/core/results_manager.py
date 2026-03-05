@@ -2,7 +2,7 @@ import pickle
 import logging
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 GLOBAL_INDEX = Path("src/results/index.yaml")
@@ -29,7 +29,16 @@ class ResultsManager:
     def run_exists(self, run_id: int) -> bool:
         return run_id in self._load_index()
 
-    def load_run(self, run_id: int) -> dict:
+    def _build_checkpoint_path(self, save_dir: Optional[str], config_hash: Optional[str]) -> Optional[str]:
+        if not save_dir:
+            return None
+
+        checkpoint_root = Path(save_dir) / "models"
+        if config_hash:
+            return str(checkpoint_root / config_hash)
+        return str(checkpoint_root)
+
+    def load_run(self, run_id: int, include_artifacts: bool = False) -> dict:
         index = self._load_index()
         if run_id not in index:
             raise FileNotFoundError(f"No result found for run id {run_id}")
@@ -38,23 +47,30 @@ class ResultsManager:
             f"Using pretrained checkpoint from run {run_id} at {run_dir}")
         with open(run_dir / "result.yaml") as f:
             result = yaml.safe_load(f)
-        for fname, key in [("predictions.pkl", "predictions"), ("test_data.pkl", "test_data")]:
-            p = run_dir / fname
-            if p.exists():
-                with open(p, "rb") as f:
-                    result[key] = pickle.load(f)
+        if include_artifacts:
+            for fname, key in [("predictions.pkl", "predictions"), ("test_data.pkl", "test_data")]:
+                p = run_dir / fname
+                if p.exists():
+                    with open(p, "rb") as f:
+                        result[key] = pickle.load(f)
         return result
 
     def save_run(self, run_id: int, exp_name: str, results: Dict, predictions=None,
                  test_data=None, status: str = "success", error: str = None,
                  runtime: float = None, run_cfg: Dict = None,
-                 save_dir: str = None, config_hash: str = None,) -> Dict:
+                 save_dir: str = None, config_hash: str = None,
+                 model_config: Dict = None,
+                 checkpoint_path: str = None,) -> Dict:
         run_dir = self.results_dir / str(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
+        resolved_checkpoint_path = checkpoint_path or self._build_checkpoint_path(save_dir, config_hash)
 
         run_result = {"id": run_id, "experiment": exp_name, "status": status,
                       "run_cfg": run_cfg, "results": results, "runtime": runtime,
-                      "checkpoint_path": f"src/data/.cache/{save_dir}/models/{config_hash}"}
+                  "checkpoint_path": resolved_checkpoint_path,
+                  "save_dir": save_dir,
+                  "config_hash": config_hash,
+                  "model_config": model_config}
         if error:
             run_result["error"] = error
 

@@ -89,24 +89,92 @@ runs:
     overrides:
       model:
         params:
-          num_epochs: 1
+          mode: "pretrain"
+          num_epochs: 200
+          num_target: 5
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 5
 
   - id: 5
-    name: "Finetune ECG_MultiViewClassifier"
+    name: "Finetune EMG_MultiViewClassifier"
     task: "classification"
-    data: "ecg"
+    data: "emg"
     model: "multi_view_classifier"
     target: 1
-    pretrained_run: 1
+    pretrained_run: 4
     skip_training: False
     preprocessor: "multi_view_contrastive"
     metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
     overrides:
       model:
         params:
-           num_epochs: 1
            mode: "finetune"
+           batch_size: 16
+           num_epochs: 100
+           num_target: 3
       metrics:
         auroc_auprc:
           params:
-            num_classes: 4
+            num_classes: 3
+    
+  - id: 6
+    name: "Finetune EMG_MultiViewClassifier"
+    task: "classification"
+    data: "emg"
+    model: "multi_view_classifier"
+    target: 1
+    pretrained_run: 4
+    skip_training: False
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+           mode: "freeze"
+           batch_size: 16
+           num_epochs: 100
+           num_target: 3
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  # - id: 7
+  #   name: "Pretrain SleepEEG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         num_epochs: 10
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 8
+  #   name: "Finetune EMG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   pretrained_run: 7
+  #   skip_training: False
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #          mode: "finetune"
+  #          batch_size: 16
+  #          num_epochs: 5
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3

@@ -36,6 +36,10 @@ class MultiViewClassifierConfig(DetectorConfig):
         
         # Training mode
         mode: str = 'finetune',
+
+        # Training behavior controls
+        pretrain_validate_on_train: bool = False,
+        finetune_monitor_metric: str = 'loss',
         
         # Data augmentation
         augmentation_strength: float = 0.1,
@@ -76,6 +80,8 @@ class MultiViewClassifierConfig(DetectorConfig):
         self.lam = lam
         
         self.mode = mode
+        self.pretrain_validate_on_train = pretrain_validate_on_train
+        self.finetune_monitor_metric = finetune_monitor_metric
         self.augmentation_strength = augmentation_strength
         self.use_gpu = use_gpu
         self.checkpoint_path = checkpoint_path

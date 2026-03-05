@@ -11,9 +11,13 @@ class FFTTransform(TransformBase):
     Computes absolute value of FFT along sequence dimension for numeric columns.
     """
     
-    def __init__(self, numeric_only=True):
+    def __init__(self, numeric_only=True, samplewise_mode: bool = False, num_feature: int = 1, **kwargs):
         super().__init__()
         self.numeric_only = numeric_only
+        if "paper_mode" in kwargs:
+            samplewise_mode = kwargs.pop("paper_mode")
+        self.samplewise_mode = samplewise_mode
+        self.num_feature = int(num_feature)
         self._original_names = None
         self._numeric_columns = None
     
@@ -32,6 +36,31 @@ class FFTTransform(TransformBase):
     
     def __call__(self, time_series: TimeSeries) -> TimeSeries:
         df = time_series.to_pd()
+
+        if self.samplewise_mode:
+            base_cols = [c for c in df.columns if not str(c).endswith("_derivative") and not str(c).endswith("_fft")]
+            arr = df[base_cols].values.astype(float)
+            n, cols = arr.shape
+            d = max(1, self.num_feature)
+            if cols % d != 0:
+                raise ValueError(
+                    f"Column count {cols} not divisible by num_feature {d} in paper_mode"
+                )
+            l = cols // d
+            x = arr.reshape(n, l, d)
+            xf = np.abs(np.fft.fft(x, axis=1)).reshape(n, cols)
+
+            fft_cols = [f"{c}_fft" for c in base_cols]
+            existing = [c for c in fft_cols if c in df.columns]
+            if existing:
+                df = df.drop(columns=existing)
+
+            fft_df = pd.DataFrame(xf, index=df.index, columns=fft_cols)
+            self.inversion_state = {
+                'original_columns': list(df.columns),
+                'fft_columns': fft_cols,
+            }
+            return TimeSeries.from_pd(pd.concat([df, fft_df], axis=1))
         
         fft_dfs = []
         for col in self._numeric_columns:

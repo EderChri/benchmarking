@@ -4,4 +4,5 @@ from . import energy_power_dataset_loader
 from . import torch_dataset_loader
 from . import single_csv_dataset_loader
 from . import ran_dataset_loader
+from . import multi_view_contrastive_loader
 from .base_loader import LOADER_REGISTRY, BaseDataLoader

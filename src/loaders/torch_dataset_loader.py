@@ -44,7 +44,7 @@ class TorchDatasetLoader(BaseDataLoader):
         print(f"Loaded supervised dataset with {len(train_ts)} training samples, "
               f"{len(val_ts)} validation samples, and {len(test_ts)} test samples.")
 
-        return (train_ts, train_labels), (val_ts, val_labels), (test_ts, test_labels)
+        return (train_ts, train_labels), (test_ts, test_labels), (val_ts, val_labels)
 
     def _load_unsupervised(self, train_data, val_data, test_data):
         """Load unsupervised datasets without labels"""
@@ -57,7 +57,7 @@ class TorchDatasetLoader(BaseDataLoader):
             val_ts = val_ts[:100]
             test_ts = test_ts[:100]
 
-        return train_ts, val_ts, test_ts
+        return train_ts, test_ts, val_ts
 
     def _create_timeseries_with_labels(self, data_dict):
         """Convert dictionary with samples and labels to TimeSeries pair"""

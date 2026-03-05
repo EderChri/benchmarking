@@ -13,13 +13,17 @@ class HermiteCubicDerivativeTransform(TransformBase):
     For multivariate series, computes derivatives for numeric columns only.
     """
     
-    def __init__(self, numeric_only=True):
+    def __init__(self, numeric_only=True, samplewise_mode: bool = False, num_feature: int = 1, **kwargs):
         """
         Args:
             numeric_only: If True, only compute derivatives for numeric columns
         """
         super().__init__()
         self.numeric_only = numeric_only
+        if "paper_mode" in kwargs:
+            samplewise_mode = kwargs.pop("paper_mode")
+        self.samplewise_mode = samplewise_mode
+        self.num_feature = int(num_feature)
         self._original_names = None
         self._numeric_columns = None
     
@@ -65,6 +69,36 @@ class HermiteCubicDerivativeTransform(TransformBase):
     def __call__(self, time_series: TimeSeries) -> TimeSeries:
         """Apply Hermite cubic derivative transform and stack with original series"""
         df = time_series.to_pd()
+
+        if self.samplewise_mode:
+            base_cols = [c for c in df.columns if not str(c).endswith("_derivative") and not str(c).endswith("_fft")]
+            arr = df[base_cols].values.astype(float)
+            n, cols = arr.shape
+            d = max(1, self.num_feature)
+            if cols % d != 0:
+                raise ValueError(
+                    f"Column count {cols} not divisible by num_feature {d} in paper_mode"
+                )
+            l = cols // d
+            x = arr.reshape(n, l, d)
+
+            x_t = torch.tensor(x, dtype=torch.float32)
+            t = torch.linspace(0, 1, l, dtype=torch.float32)
+            coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(x_t)
+            spline = torchcde.CubicSpline(coeffs, t)
+            dx = spline.derivative(t).numpy().reshape(n, cols)
+
+            derivative_cols = [f"{c}_derivative" for c in base_cols]
+            existing = [c for c in derivative_cols if c in df.columns]
+            if existing:
+                df = df.drop(columns=existing)
+
+            derivative_df = pd.DataFrame(dx, index=df.index, columns=derivative_cols)
+            self.inversion_state = {
+                'original_columns': list(df.columns),
+                'derivative_columns': derivative_cols,
+            }
+            return TimeSeries.from_pd(pd.concat([df, derivative_df], axis=1))
         
         # Collect numeric columns data
         numeric_data = []

@@ -38,7 +38,7 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
     def __init__(self, config: MultiViewClassifierConfig, save_dir: Optional[str] = None):
         SupervisedClassifierBase.__init__(self, config)
         HashCheckpointModel.__init__(self, config, save_dir)
-        if not hasattr(self, 'current_epoch'):
+        if not hasattr(self, 'current_epoch') or self.current_epoch is None:
             self.current_epoch = 0
 
         self.device = self._get_device()
@@ -94,7 +94,8 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             loaded_model.encoder_optimizer.state_dict())
         self.clf_optimizer.load_state_dict(
             loaded_model.clf_optimizer.state_dict())
-        self.current_epoch = loaded_model.current_epoch
+        loaded_epoch = getattr(loaded_model, "current_epoch", 0)
+        self.current_epoch = 0 if loaded_epoch is None else int(loaded_epoch)
 
     def _get_device(self):
         """Determine device for training"""
@@ -154,6 +155,16 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         if type(time_series) != pd.DataFrame:
             time_series = time_series.to_pd()
 
+        num_feature = max(1, int(getattr(self.config, "num_feature", 1)))
+
+        def _reshape_domain(values_2d: np.ndarray) -> np.ndarray:
+            if values_2d.ndim != 2:
+                return values_2d
+            n, cols = values_2d.shape
+            if cols % num_feature == 0:
+                return values_2d.reshape(n, cols // num_feature, num_feature)
+            return values_2d[:, :, np.newaxis]
+
         # Identify columns by domain
         original_cols = [
             c
@@ -171,20 +182,27 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
             xt)
         xf = time_series[fft_cols].values if fft_cols else np.zeros_like(xt)
 
-        if xt.ndim == 2:
-            xt = xt[:, :, np.newaxis]
-            dx = dx[:, :, np.newaxis]
-            xf = xf[:, :, np.newaxis]
+        xt = _reshape_domain(xt)
+        dx = _reshape_domain(dx)
+        xf = _reshape_domain(xf)
 
         return xt, dx, xf
 
     def _augment_data(self, xt, dx, xf):
-        """Apply data augmentation (jittering)"""
-        strength = self.config.augmentation_strength
+        """Apply original-paper augmentation: jitter for time/derivative, frequency perturbation for FFT."""
+        sigma = self.config.augmentation_strength
+        pertub_ratio = 0.05
 
-        xt_aug = xt + torch.randn_like(xt) * strength
-        dx_aug = dx + torch.randn_like(dx) * strength
-        xf_aug = xf + torch.randn_like(xf) * strength
+        xt_aug = xt + torch.normal(mean=0.0, std=sigma, size=xt.shape, device=xt.device)
+        dx_aug = dx + torch.normal(mean=0.0, std=sigma, size=dx.shape, device=dx.device)
+
+        mask_remove = (torch.rand(xf.shape, device=xf.device) > pertub_ratio).to(xf.dtype)
+        xf_removed = xf * mask_remove
+        mask_add = (torch.rand(xf.shape, device=xf.device) > (1 - pertub_ratio)).to(xf.dtype)
+        max_amplitude = xf.max()
+        random_am = torch.rand(xf.shape, device=xf.device) * (max_amplitude * 0.1)
+        xf_added = xf + (mask_add * random_am)
+        xf_aug = xf_removed + xf_added
 
         return xt_aug, dx_aug, xf_aug
 
@@ -284,7 +302,8 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
                     loss_c_val = loss_c.item()
 
             self.scaler.scale(loss).backward()
-            self.scaler.step(self.encoder_optimizer)
+            if self.config.mode != "freeze":
+                self.scaler.step(self.encoder_optimizer)
             if self.config.mode != "pretrain":
                 self.scaler.step(self.clf_optimizer)
             self.scaler.update()
@@ -346,7 +365,35 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
         # Avoid division by zero if loader is empty
         return val_loss / total_samples if total_samples > 0 else 0.0
 
+    def _evaluate_accuracy(self, loader) -> float:
+        self.encoder.eval()
+        self.classifier.eval()
+
+        total = 0
+        correct = 0
+
+        with torch.no_grad():
+            for batch_xt, batch_dx, batch_xf, batch_y in loader:
+                batch_xt = batch_xt.to(self.device)
+                batch_dx = batch_dx.to(self.device)
+                batch_xf = batch_xf.to(self.device)
+                batch_y = batch_y.to(self.device)
+
+                ht, hd, hf, zt, zd, zf = self.encoder(batch_xt, batch_dx, batch_xf)
+                logits = self.classifier(zt, zd, zf) if self.config.feature == "latent" else self.classifier(ht, hd, hf)
+                preds = logits.argmax(dim=-1)
+
+                correct += (preds == batch_y.long()).sum().item()
+                total += batch_y.size(0)
+
+        return (correct / total) if total > 0 else 0.0
+
     def _train(self, train_data, train_config, train_labels, val_data=None, val_labels=None):
+        if self.current_epoch is None:
+            self.current_epoch = 0
+        if self.config.num_epochs is None:
+            raise ValueError("num_epochs must be set for training")
+
         # 1. Prepare DataLoaders
         xt, dx, xf = self._extract_domains(train_data)
         y_train = train_labels.to_pd().values.flatten()
@@ -366,35 +413,61 @@ class MultiViewClassifier(HashCheckpointModel, SupervisedClassifierBase):
                 batch_size=self.config.batch_size, shuffle=False
             )
 
+        if self.config.mode == "pretrain" and self.config.pretrain_validate_on_train:
+            val_loader = train_loader
+
         # 2. Setup Scheduler & Early Stopping
+        monitor_metric = (
+            str(getattr(self.config, "finetune_monitor_metric", "loss")).lower()
+            if self.config.mode in ["finetune", "freeze"]
+            else "loss"
+        )
+        monitor_accuracy = monitor_metric == "accuracy"
+
+        scheduler_mode = "max" if monitor_accuracy else "min"
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.encoder_optimizer, mode='min', factor=0.5, patience=10
+            self.encoder_optimizer, mode=scheduler_mode, factor=0.5, patience=10
         )
         early_stop_counter = 0
-        best_val_loss = float('inf')
+        best_monitor_value = -float('inf') if monitor_accuracy else float('inf')
 
         # 3. Training Loop
-        for epoch in range(self.current_epoch, self.config.num_epochs):
+        for epoch in range(int(self.current_epoch), int(self.config.num_epochs)):
             train_loss, train_loss_c = self._train_epoch(train_loader)
 
             # Validation Step
             current_val_loss = self._validate(
                 val_loader) if val_loader else train_loss
+            current_val_acc = None
+            if monitor_accuracy and val_loader is not None:
+                current_val_acc = self._evaluate_accuracy(val_loader)
+
+            monitor_value = current_val_acc if monitor_accuracy else current_val_loss
 
             # Step Scheduler
-            scheduler.step(current_val_loss)
+            scheduler.step(monitor_value)
 
-            logger.info(
-                f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {current_val_loss:.4f}")
+            if current_val_acc is not None:
+                logger.info(
+                    f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {current_val_loss:.4f}, Val Acc: {current_val_acc:.4f}"
+                )
+            else:
+                logger.info(
+                    f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {current_val_loss:.4f}"
+                )
 
             # Early Stopping & Saving
-            if current_val_loss < best_val_loss:
-                best_val_loss = current_val_loss
+            is_better = monitor_value > best_monitor_value if monitor_accuracy else monitor_value < best_monitor_value
+            if is_better:
+                best_monitor_value = monitor_value
                 early_stop_counter = 0
                 self.current_epoch = epoch + 1
 
                 self.save(save_config=True)  # Save best model
-                logger.info(f"  --> Best model saved (Loss: {best_val_loss:.4f})")
+                if monitor_accuracy:
+                    logger.info(f"  --> Best model saved (Val Acc: {best_monitor_value:.4f})")
+                else:
+                    logger.info(f"  --> Best model saved (Val Loss: {best_monitor_value:.4f})")
             else:
                 early_stop_counter += 1
 

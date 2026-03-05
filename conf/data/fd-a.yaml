@@ -1,3 +1,4 @@
 name: FD-A
-source: torch_dataset
+source: multi_view_dataset
 dataset_dir: "src/data/FD-A"
+file_name: "_DA_FD-A_256_00.pkl"

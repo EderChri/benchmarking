@@ -22,7 +22,7 @@ from core.results_manager import ResultsManager
 from core.task_executor import TaskExecutor
 from core.visualizer import Visualizer
 from models.hash_checkpoint_model import HashCheckpointModel
-from models.model_checkpoint import save_model
+from models.model_checkpoint import save_model, compute_model_hash, get_checkpoint_dir
 
 warnings.filterwarnings("ignore", message="'H' is deprecated")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -45,11 +45,29 @@ class BenchmarkRunner:
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = True
 
     def _load_yaml(self, path: Path) -> Dict[str, Any]:
         with open(path) as f:
             return yaml.safe_load(f)
+
+    def _resolve_save_dir_from_result(self, prior_result: Dict[str, Any]) -> str:
+        save_dir = prior_result.get("save_dir")
+        if save_dir:
+            return save_dir
+
+        checkpoint_path = prior_result.get("checkpoint_path")
+        if not checkpoint_path:
+            return None
+
+        cp = Path(checkpoint_path)
+        if cp.name == "models":
+            return str(cp.parent)
+        if "models" in cp.parts:
+            idx = cp.parts.index("models")
+            if idx > 0:
+                return str(Path(*cp.parts[:idx]))
+        return str(cp)
 
     def _load_run_configs(self, run: Dict[str, Any]) -> Dict[str, Any]:
         data_cfg = self.factory.get_component_by_name(run["data"], "data")
@@ -92,6 +110,14 @@ class BenchmarkRunner:
                         configs[config_type][key].update(value)
                     else:
                         configs[config_type][key] = value
+
+        model_num_feature = configs.get("model", {}).get("params", {}).get("num_feature")
+        preproc_cfg = configs.get("preprocessing", {})
+        if model_num_feature is not None and isinstance(preproc_cfg, dict) and "transforms" in preproc_cfg:
+            for transform_cfg in preproc_cfg.get("transforms", []):
+                params = transform_cfg.setdefault("params", {})
+                if params.get("samplewise_mode"):
+                    params["num_feature"] = int(model_num_feature)
         return configs
 
 
@@ -118,12 +144,15 @@ class BenchmarkRunner:
                 splits = self.pipeline.get_data(run, configs)
                 logger.info(f"[Run {run_id}] Data loaded and preprocessed. Training model...")
                 self.factory.current_cache_key = self.pipeline.cache.cache_key if self.pipeline.cache else None
+                current_save_dir = f"src/data/.cache/{self.factory.current_cache_key}"
                 pretrained_save_dir = None
                 pretrained_config_path = None
+                pretrained_model_config = None
     
                 if pretrained_run_id := run.get("pretrained_run"):
                     prior = rm.load_run(pretrained_run_id)
-                    pretrained_save_dir = prior.get("save_dir")
+                    pretrained_save_dir = self._resolve_save_dir_from_result(prior)
+                    pretrained_model_config = prior.get("model_config")
                     if pretrained_model := run.get("pretrained_model"):
                         pretrained_config_path = str(self.config_dir / "models" / f"{pretrained_model}.yaml")
 
@@ -131,7 +160,9 @@ class BenchmarkRunner:
                     configs["model"],
                     pretrained_save_dir=pretrained_save_dir,
                     pretrained_config_path=pretrained_config_path,
-                    pretrained_run_id=pretrained_run_id
+                    pretrained_run_id=pretrained_run_id,
+                    pretrained_model_config=pretrained_model_config,
+                    save_dir_override=current_save_dir,
                 )
                 if pretrained_run_id:
                     model.current_epoch = 0  # ensure epoch starts at 0 for pretrained runs
@@ -140,10 +171,16 @@ class BenchmarkRunner:
                     model = self.executor.train(model, run["task"], splits)
 
                 # Save non-HashCheckpointModel models (HashCheckpointModel saves internally during train)
-                save_dir = f"src/data/.cache/{self.factory.current_cache_key}"
+                save_dir = current_save_dir
                 if not isinstance(model, HashCheckpointModel) and not existing:
 
                     save_model(model, save_dir, configs["model"])
+
+                config_hash = compute_model_hash(configs["model"])
+                if isinstance(model, HashCheckpointModel):
+                    checkpoint_path = model._get_checkpoint_dir() if hasattr(model, "_get_checkpoint_dir") else None
+                else:
+                    checkpoint_path = str(get_checkpoint_dir(save_dir, configs["model"]))
 
                 predictions = self.executor.predict(run["task"], model, splits.test_data)
                 prediction_scores = None
@@ -165,6 +202,9 @@ class BenchmarkRunner:
                     runtime=time.time() - start,
                     run_cfg=run,
                     save_dir=save_dir,
+                    config_hash=config_hash,
+                    model_config=configs["model"],
+                    checkpoint_path=checkpoint_path,
                 )
 
             except Exception as e:

@@ -25,7 +25,7 @@ class ComponentFactory:
             "metrics": self._instantiate_metric,
             "models": self._instantiate_model,
             "preprocessing": self._instantiate_preprocessing,
-            "plots": self._instantiate_plot,          # <-- add this
+            "plots": self._instantiate_plot,       
         }
         handler = handlers.get(component_type)
         if not handler:
@@ -47,26 +47,62 @@ class ComponentFactory:
         module = importlib.import_module(f"metrics.{config['module']}")
         return getattr(module, config["class"])(**config.get("params", {}))
 
-    def _instantiate_model(self, config: Dict[str, Any], pretrained_save_dir=None, pretrained_config_path=None, pretrained_run_id=None):
+    def _instantiate_model(
+        self,
+        config: Dict[str, Any],
+        pretrained_save_dir=None,
+        pretrained_config_path=None,
+        pretrained_run_id=None,
+        pretrained_model_config: Dict[str, Any] = None,
+        save_dir_override: str = None,
+    ):
         module_path = f"merlion.models.{config['module']}" if config.get("source") == "merlion" else config["module"]
         module = importlib.import_module(module_path)
         model_cls = getattr(module, config["class"])
         model_config = getattr(module, config["config_class"])(**config.get("params", {}))
+        from models.hash_checkpoint_model import HashCheckpointModel
 
-        save_dir = pretrained_save_dir or f"src/data/.cache/{self.current_cache_key}"
+        save_dir = save_dir_override or f"src/data/.cache/{self.current_cache_key}"
+
+        if pretrained_run_id is not None and pretrained_save_dir:
+            transferred = None
+
+            if issubclass(model_cls, HashCheckpointModel):
+                import inspect
+
+                extra = {}
+                if "pretrained_config_path" in inspect.signature(model_cls.__init__).parameters:
+                    extra["pretrained_config_path"] = pretrained_config_path
+
+                transferred = model_cls(model_config, save_dir=pretrained_save_dir, **extra)
+                if not getattr(transferred, "_checkpoint_loaded", False):
+                    transferred = None
+            else:
+                source_config = pretrained_model_config or config
+                transferred = load_model_if_exists(model_cls, pretrained_save_dir, source_config)
+
+            if transferred is not None:
+                if hasattr(transferred, "config"):
+                    transferred.config = model_config
+                if hasattr(transferred, "save_dir"):
+                    transferred.save_dir = save_dir
+                if hasattr(transferred, "current_epoch"):
+                    transferred.current_epoch = 0
+                logger.info("Loaded transfer model from pretrained run checkpoint")
+                return transferred, False
+
+            logger.warning("Requested pretrained_run but no transferable checkpoint was found; initializing fresh model")
 
         # Try loading existing checkpoint first (works for ALL models)
-        existing = load_model_if_exists(model_cls, save_dir, config)
-        if existing is not None and pretrained_run_id is None:
-            logger.info("Successfully resumed from existing checkpoint")
-            return existing, True
-        elif existing is not None:
-            logger.info("Using existing pretrained model from other run for new run")
-            return existing, False
+        existing = None
+        if pretrained_run_id is None:
+            existing = load_model_if_exists(model_cls, save_dir, config)
+            if existing is not None:
+                logger.info("Successfully resumed from existing checkpoint")
+                return existing, True
 
         # Instantiate fresh — inject extra kwargs only for HashCheckpointModel subclasses
         import inspect
-        from models.hash_checkpoint_model import HashCheckpointModel
         if issubclass(model_cls, HashCheckpointModel):
             extra = {}
             if "pretrained_config_path" in inspect.signature(model_cls.__init__).parameters:

@@ -1,4 +1,5 @@
 name: SleepEEG
-source: torch_dataset
+source: multi_view_dataset
 dataset_dir: "src/data/SleepEEG"
+file_name: "_DA_SleepEEG_256_00.pkl"
 has_labels: true

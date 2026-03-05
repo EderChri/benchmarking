@@ -1,38 +1,35 @@
 transforms:
-  - name: Resize
+  - class: NormalizeColumnsExcludingSuffixesTransform
+    module: domain_normalize
     source: custom
-    module: resize
-    class: ResizeTransform
     params:
-      target_length: 256
-      axis: 1
+      excluded_suffixes: ["_derivative", "_fft"]
+      samplewise_mode: true
 
-
-  - class: MeanVarNormalize
-    module: normalize
-    source: merlion
-    params: {}
-  
   - class: HermiteCubicDerivativeTransform
     module: hermite_cubic_derivative
     source: custom
     params:
-      numeric_only: true
-  
-  # Also normalise after derivative computation
-  - class: MeanVarNormalize
-    module: normalize
-    source: merlion
-    params: {}
-  
+      samplewise_mode: true
+      num_feature: 1
+
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "_derivative"
+      samplewise_mode: true
+
   - class: FFTTransform
     module: fft
     source: custom
     params:
-      numeric_only: true
-  
-  # Final normalization for FFT
-  - class: MeanVarNormalize
-    module: normalize
-    source: merlion
-    params: {}
+      samplewise_mode: true
+      num_feature: 1
+
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "_fft"
+      samplewise_mode: true

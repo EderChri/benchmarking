@@ -1,4 +1,5 @@
 name: ECG
-source: torch_dataset
+source: multi_view_dataset
 dataset_dir: "src/data/ECG"
+file_name: "_DA_ECG_256_00.pkl"
 has_labels: true

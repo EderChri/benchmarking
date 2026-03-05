@@ -10,7 +10,7 @@ params:
   num_head: 4
   num_layers: 3
   num_target: 4
-  dropout: 0.1
+  dropout: 0.2
   
   # Training
   batch_size: 128
@@ -23,12 +23,14 @@ params:
   
   # Loss
   loss_type: 'ALL'  # 'ALL', 'TDF', 'TD', 'TF', 'DF', 'T', 'D', 'F'
-  feature: 'latent'  # 'latent' or 'hidden'
+  feature: 'hidden'  # 'latent' or 'hidden'
   temperature: 0.07
-  lam: 0.1
+  lam: 0.0
   
   # Mode
   mode: 'pretrain'  # 'pretrain', 'finetune', 'freeze'
+  pretrain_validate_on_train: true
+  finetune_monitor_metric: 'accuracy'
   use_gpu: true
   checkpoint_path: null
   
