@@ -1,0 +1,6 @@
+name: Horizontal_Dip
+source: single_csv
+file_path: "src/data/horizontal/horizontal_dip_anomaly.csv"
+index_column: timestamp
+label_column: anomaly
+test_split_ratio: 0.2

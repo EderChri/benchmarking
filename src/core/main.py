@@ -198,6 +198,7 @@ class BenchmarkRunner:
                     run_id, run["name"], results,
                     predictions=predictions,
                     test_data=splits.test_data,
+                    test_labels=splits.test_labels,
                     status="success",
                     runtime=time.time() - start,
                     run_cfg=run,
@@ -225,4 +226,4 @@ class BenchmarkRunner:
 if __name__ == "__main__":
     runner = BenchmarkRunner(test_mode=False, use_cache=True)
     results_dir = runner.run_experiments()
-    #runner.visualise(results_dir)  # uncomment to visualise after run
+    runner.visualise(results_dir)  # uncomment to visualise after run

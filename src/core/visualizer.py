@@ -29,7 +29,11 @@ class Visualizer:
         run_dir = self.results_dir / str(run_id)
         with open(run_dir / "result.yaml") as f:
             result = yaml.safe_load(f)
-        for fname, key in [("predictions.pkl", "predictions"), ("test_data.pkl", "test_data")]:
+        for fname, key in [
+            ("predictions.pkl", "predictions"),
+            ("test_data.pkl", "test_data"),
+            ("test_labels.pkl", "test_labels"),
+        ]:
             p = run_dir / fname
             if p.exists():
                 with open(p, "rb") as f:
