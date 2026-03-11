@@ -18,6 +18,7 @@ from core.cache import PreprocessingCache
 from core.data_pipeline import DataPipeline
 from core.factory import ComponentFactory
 from core.metric_evaluator import MetricEvaluator
+from core.mlop_tracker import MlopTracker
 from core.results_manager import ResultsManager
 from core.task_executor import TaskExecutor
 from core.visualizer import Visualizer
@@ -37,6 +38,7 @@ class BenchmarkRunner:
         self.factory = ComponentFactory(config_dir)
         self.pipeline = DataPipeline(self.factory, cache, test_mode)
         self.executor = TaskExecutor()
+        self.tracker = MlopTracker()
 
     def _set_seed(self, seed: int):
         random.seed(seed)
@@ -139,8 +141,12 @@ class BenchmarkRunner:
                 continue
 
             start = time.time()
+            tracking_started = False
             try:
                 configs = self._apply_overrides(self._load_run_configs(run), run)
+                self.tracker.start_run(run=run, run_configs=configs, results_dir=results_dir)
+                tracking_started = True
+                self.tracker.log({"status": 1, "stage": "data_loading"}, step=1)
                 splits = self.pipeline.get_data(run, configs)
                 logger.info(f"[Run {run_id}] Data loaded and preprocessed. Training model...")
                 self.factory.current_cache_key = self.pipeline.cache.cache_key if self.pipeline.cache else None
@@ -168,6 +174,7 @@ class BenchmarkRunner:
                     model.current_epoch = 0  # ensure epoch starts at 0 for pretrained runs
 
                 if not existing:
+                    self.tracker.log({"status": 2, "stage": "training"}, step=2)
                     model = self.executor.train(model, run["task"], splits)
 
                 # Save non-HashCheckpointModel models (HashCheckpointModel saves internally during train)
@@ -182,10 +189,14 @@ class BenchmarkRunner:
                 else:
                     checkpoint_path = str(get_checkpoint_dir(save_dir, configs["model"]))
 
+                # Important: watch model only after all checkpoint serialization is done.
+                self.tracker.watch_model(model)
+
                 predictions = self.executor.predict(run["task"], model, splits.test_data)
                 prediction_scores = None
                 if run["task"].lower() == "classification":
                     prediction_scores = self.executor.classification_scores(model, splits.test_data)
+                self.tracker.log({"status": 3, "stage": "evaluation"}, step=3)
                 results = evaluator.evaluate(
                     configs["metrics"],
                     run["task"],
@@ -207,10 +218,14 @@ class BenchmarkRunner:
                     model_config=configs["model"],
                     checkpoint_path=checkpoint_path,
                 )
+                self.tracker.log_metrics(results, step=4)
+                self.tracker.finish_run(status="success", runtime=time.time() - start)
 
             except Exception as e:
                 logger.error(f"[Run {run_id}] failed: {e}")
                 traceback.print_exc()
+                if tracking_started:
+                    self.tracker.finish_run(status="failed", runtime=time.time() - start, error=str(e))
                 run_result = rm.save_run(run_id, run["name"], {}, status="failed",
                                           error=str(e), runtime=time.time() - start)
             all_results.append(run_result)

@@ -27,6 +27,17 @@ class Visualizer:
 
     def _load_run(self, run_id: int) -> Dict:
         run_dir = self.results_dir / str(run_id)
+        if not (run_dir / "result.yaml").exists():
+            index_path = Path("src/results/index.yaml")
+            if index_path.exists():
+                with open(index_path) as f:
+                    index = yaml.safe_load(f) or {}
+                indexed_dir = index.get(run_id)
+                if indexed_dir is None:
+                    indexed_dir = index.get(str(run_id))
+                if indexed_dir:
+                    run_dir = Path(indexed_dir)
+
         with open(run_dir / "result.yaml") as f:
             result = yaml.safe_load(f)
         for fname, key in [

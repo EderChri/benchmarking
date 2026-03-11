@@ -18,3 +18,5 @@ src/data/*
 src/data/energy_power/*
 !src/data/energy_power/download.py
 original_paper/* 
+.env
+*.log

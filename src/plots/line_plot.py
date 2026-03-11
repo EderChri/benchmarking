@@ -24,11 +24,34 @@ class LinePlot(BasePlot):
         for run_id, art in zip(run_ids, artifacts):
             name = art.get("experiment", f"run_{run_id}")
             task = str(art.get("run_cfg", {}).get("task", "")).lower()
+            pred = art.get("predictions")
+
+            if task in ["forecast", "forecasting"] and (td := art.get("test_data")) is not None:
+                test_df = td.to_pd()
+                ax.plot(
+                    test_df.index,
+                    test_df.iloc[:, 0],
+                    linestyle="-",
+                    label=f"{name} (actual TS)",
+                    alpha=alpha,
+                )
+
+                if pred is not None:
+                    pred_df = pred.to_pd()
+                    ax.plot(
+                        pred_df.index,
+                        pred_df.iloc[:, 0],
+                        linestyle="--",
+                        label=f"{name} (predicted TS)",
+                        alpha=alpha,
+                    )
+                continue
+
             if (td := art.get("test_data")) is not None:
                 test_df = td.to_pd()
                 ax.plot(test_df.index, test_df.iloc[:, 0], linestyle="-", label=f"{name} (ground truth series)", alpha=alpha)
 
-                if task in ["anomaly", "anomaly_detection"] and (pred := art.get("predictions")) is not None:
+                if task in ["anomaly", "anomaly_detection"] and pred is not None:
                     pred_df = pred.to_pd()
                     pred_idx = test_df.index.intersection(pred_df.index)
                     if len(pred_idx) > 0:
@@ -65,7 +88,7 @@ class LinePlot(BasePlot):
                                 label=f"{name} (ground-truth anomaly)",
                                 zorder=5,
                             )
-            if (pred := art.get("predictions")) is not None:
+            if pred is not None:
                 pred_df = pred.to_pd()
                 ax.plot(pred_df.index, pred_df.iloc[:, 0], linestyle="--", label=f"{name} (prediction signal)", alpha=alpha)
         ax.legend(); ax.grid(True)

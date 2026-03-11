@@ -1,0 +1,32 @@
+name: MultiViewForecaster
+source: custom
+module: models.multi_view_forecaster
+class: MultiViewForecaster
+config_class: MultiViewForecasterConfig
+params:
+  num_feature: 1
+  num_embedding: 64
+  num_hidden: 128
+  num_head: 4
+  num_layers: 3
+  dropout: 0.2
+
+  feature: 'latent'   # 'latent' or 'hidden'
+  loss_type: 'ALL'    # 'ALL', 'TDF', 'TD', 'TF', 'DF', 'T', 'D', 'F'
+
+  window_size: 48
+  forecast_horizon: 24
+  target_seq_index: 0
+
+  batch_size: 128
+  num_epochs: 200
+  patience: 20
+  lr: 0.001
+  weight_decay: 0.00001
+  l1_scale: 0.0
+  l2_scale: 0.01
+
+  use_gpu: true
+  checkpoint_path: null
+
+  max_forecast_steps: null

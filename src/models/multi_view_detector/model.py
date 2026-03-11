@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from models.multi_view_classifier.model import Encoder, InteractionLayer, SelfAttention
+from models.multi_view_core.encoder import InteractionLayer, SelfAttention
 
 
 class AnomalyHead(nn.Module):

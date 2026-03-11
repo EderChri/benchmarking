@@ -1,0 +1,35 @@
+transforms:
+  - class: NormalizeColumnsExcludingSuffixesTransform
+    module: domain_normalize
+    source: custom
+    params:
+      excluded_suffixes: ["_derivative", "_fft"]
+      samplewise_mode: false
+
+  - class: HermiteCubicDerivativeTransform
+    module: hermite_cubic_derivative
+    source: custom
+    params:
+      samplewise_mode: false
+      num_feature: 1
+
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "_derivative"
+      samplewise_mode: false
+
+  - class: FFTTransform
+    module: fft
+    source: custom
+    params:
+      samplewise_mode: false
+      num_feature: 1
+
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "_fft"
+      samplewise_mode: false
