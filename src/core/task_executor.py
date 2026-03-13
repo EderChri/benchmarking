@@ -1,17 +1,104 @@
+import contextlib
 import logging
+import re
+from typing import Any, Dict, Optional
+
 from merlion.models.base import ModelBase
 from merlion.utils import TimeSeries
 from core.data_splits import DataSplits
 
 logger = logging.getLogger(__name__)
 
+
+class _EpochMetricsLogHandler(logging.Handler):
+    """Parse epoch logs and stream extracted metrics to MLflow."""
+
+    def __init__(self, pattern: str, tracker: Any):
+        super().__init__(level=logging.INFO)
+        self._regex = re.compile(pattern)
+        self._tracker = tracker
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        match = self._regex.search(message)
+        if not match:
+            return
+
+        groups = match.groupdict()
+        if not groups:
+            return
+
+        epoch_raw = groups.pop("epoch", None)
+        if epoch_raw is None:
+            return
+
+        try:
+            step = int(epoch_raw)
+        except (TypeError, ValueError):
+            return
+
+        metrics = {}
+        for key, value in groups.items():
+            if value is None:
+                continue
+            try:
+                metrics[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+        if not metrics:
+            return
+
+        try:
+            self._tracker.log_metrics(metrics, step=step)
+        except Exception as exc:
+            logger.warning(f"Failed to log parsed epoch metrics to mlflow: {exc}")
+
+
 class TaskExecutor:
-    def train(self, model: ModelBase, task: str, splits: DataSplits) -> ModelBase:
-        if task in ["anomaly_detection", "anomaly", "classification"] and splits.train_labels is not None:
-            model.train(splits.train_data, train_labels=splits.train_labels, val_data=splits.val_data, val_labels=splits.val_labels)
-        else:
-            model.train(splits.train_data)
+    def train(
+        self,
+        model: ModelBase,
+        task: str,
+        splits: DataSplits,
+        tracker: Optional[Any] = None,
+        model_config: Optional[Dict[str, Any]] = None,
+    ) -> ModelBase:
+        with self._mlflow_epoch_logging(tracker=tracker, model_config=model_config):
+            if task in ["anomaly_detection", "anomaly", "classification"] and splits.train_labels is not None:
+                model.train(
+                    splits.train_data,
+                    train_labels=splits.train_labels,
+                    val_data=splits.val_data,
+                    val_labels=splits.val_labels,
+                )
+            else:
+                model.train(splits.train_data)
         return model
+
+    @contextlib.contextmanager
+    def _mlflow_epoch_logging(
+        self,
+        tracker: Optional[Any],
+        model_config: Optional[Dict[str, Any]],
+    ):
+        if not tracker or not getattr(tracker, "enabled", False):
+            yield
+            return
+
+        mlflow_cfg = (model_config or {}).get("mlflow") or {}
+        pattern = mlflow_cfg.get("epoch_log_pattern")
+        if not pattern:
+            yield
+            return
+
+        handler = _EpochMetricsLogHandler(pattern=pattern, tracker=tracker)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(handler)
+        try:
+            yield
+        finally:
+            root_logger.removeHandler(handler)
 
     def predict(self, task: str, model: ModelBase, test_data: TimeSeries):
         dispatch = {

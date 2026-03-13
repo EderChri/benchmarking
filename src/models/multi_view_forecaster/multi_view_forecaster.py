@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, TensorDataset
+from pytorch_metric_learning import losses
 
 from merlion.models.forecast.base import ForecasterBase
 from merlion.utils import TimeSeries
@@ -51,6 +52,8 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 		)
 
 		self.criterion = nn.MSELoss()
+		info_loss = losses.NTXentLoss(temperature=self.config.temperature)
+		self.info_criterion = losses.SelfSupervisedLoss(info_loss, symmetric=True)
 		self.scaler = GradScaler("cuda", enabled=self.device.type == "cuda")
 
 		self._context_xt = None
@@ -133,11 +136,14 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 			return self.forecaster_head(zt, zd, zf)
 		return self.forecaster_head(ht, hd, hf)
 
+	def _set_training_mode(self):
+		self._set_mode_for_encoder_and_head(self.forecaster_head)
+
 	def _train_epoch(self, loader: DataLoader):
-		self.encoder.train()
-		self.forecaster_head.train()
+		self._set_training_mode()
 
 		total_loss = 0.0
+		total_loss_c = 0.0
 		total_samples = 0
 
 		for batch_xt, batch_dx, batch_xf, batch_y in loader:
@@ -146,27 +152,49 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 			batch_xf = batch_xf.to(self.device)
 			batch_y = batch_y.to(self.device)
 
+			batch_xt_aug, batch_dx_aug, batch_xf_aug = self._augment_data(
+				batch_xt, batch_dx, batch_xf
+			)
+
 			self.encoder_optimizer.zero_grad()
-			self.head_optimizer.zero_grad()
+			if self.config.mode != "pretrain":
+				self.head_optimizer.zero_grad()
 
 			with autocast("cuda", enabled=self.device.type == "cuda"):
-				preds = self._forward(batch_xt, batch_dx, batch_xf)
-				loss = self.criterion(preds, batch_y)
-				loss = (
-					loss
-					+ self._weight_regularization(self.encoder)
-					+ self._weight_regularization(self.forecaster_head)
+				(ht, hd, hf, zt, zd, zf), loss = self._compute_contrastive_encoder_loss(
+					batch_xt,
+					batch_dx,
+					batch_xf,
+					batch_xt_aug,
+					batch_dx_aug,
+					batch_xf_aug,
 				)
 
+				loss_c_val = 0.0
+				if self.config.mode != "pretrain":
+					preds = (
+						self.forecaster_head(zt, zd, zf)
+						if self.config.feature == "latent"
+						else self.forecaster_head(ht, hd, hf)
+					)
+					loss_c = self.criterion(preds, batch_y)
+					loss = self._compose_finetune_loss(loss, loss_c, self.forecaster_head)
+					loss_c_val = loss_c.item()
+
 			self.scaler.scale(loss).backward()
-			self.scaler.step(self.encoder_optimizer)
-			self.scaler.step(self.head_optimizer)
+			if self.config.mode != "freeze":
+				self.scaler.step(self.encoder_optimizer)
+			if self.config.mode != "pretrain":
+				self.scaler.step(self.head_optimizer)
 			self.scaler.update()
 
 			total_loss += loss.item() * batch_xt.size(0)
+			total_loss_c += loss_c_val * batch_xt.size(0)
 			total_samples += batch_xt.size(0)
 
-		return total_loss / total_samples if total_samples > 0 else 0.0
+		if total_samples <= 0:
+			return 0.0, 0.0
+		return total_loss / total_samples, total_loss_c / total_samples
 
 	def _validate(self, loader: DataLoader):
 		self.encoder.eval()
@@ -181,9 +209,28 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 				batch_xf = batch_xf.to(self.device)
 				batch_y = batch_y.to(self.device)
 
+				batch_xt_aug, batch_dx_aug, batch_xf_aug = self._augment_data(
+					batch_xt, batch_dx, batch_xf
+				)
+
 				with autocast("cuda", enabled=self.device.type == "cuda"):
-					preds = self._forward(batch_xt, batch_dx, batch_xf)
-					loss = self.criterion(preds, batch_y)
+					(ht, hd, hf, zt, zd, zf), loss = self._compute_contrastive_encoder_loss(
+						batch_xt,
+						batch_dx,
+						batch_xf,
+						batch_xt_aug,
+						batch_dx_aug,
+						batch_xf_aug,
+					)
+
+					if self.config.mode != "pretrain":
+						preds = (
+							self.forecaster_head(zt, zd, zf)
+							if self.config.feature == "latent"
+							else self.forecaster_head(ht, hd, hf)
+						)
+						loss_c = self.criterion(preds, batch_y)
+						loss = self._compose_finetune_loss(loss, loss_c, self.forecaster_head)
 
 				val_loss += loss.item() * batch_xt.size(0)
 				total_samples += batch_xt.size(0)
@@ -200,20 +247,24 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 		xt_w, dx_w, xf_w, y_w = self._build_window_dataset(xt, dx, xf, target_col)
 		train_loader = self._make_loader(xt_w, dx_w, xf_w, y_w, shuffle=True)
 
+		self._set_training_mode()
+
+		val_loader = train_loader if self.config.mode == "pretrain" and self.config.pretrain_validate_on_train else None
+
 		scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-			self.head_optimizer, mode="min", factor=0.5, patience=10
+			self.encoder_optimizer, mode="min", factor=0.5, patience=10
 		)
 
 		best_val = float("inf")
 		early_stop_counter = 0
 
 		for epoch in range(int(self.current_epoch), int(self.config.num_epochs)):
-			train_loss = self._train_epoch(train_loader)
-			val_loss = self._validate(train_loader)
+			train_loss, train_loss_c = self._train_epoch(train_loader)
+			val_loss = self._validate(val_loader) if val_loader is not None else train_loss
 			scheduler.step(val_loss)
 
 			logger.info(
-				f"Epoch {epoch + 1}: train_loss={train_loss:.6f}, val_loss={val_loss:.6f}"
+				f"Epoch {epoch + 1}: train_loss={train_loss:.6f}, train_loss_c={train_loss_c:.6f}, val_loss={val_loss:.6f}"
 			)
 
 			if val_loss < best_val:

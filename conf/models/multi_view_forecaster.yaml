@@ -3,6 +3,9 @@ source: custom
 module: models.multi_view_forecaster
 class: MultiViewForecaster
 config_class: MultiViewForecasterConfig
+mlflow:
+  # Required named groups: epoch and one or more numeric metric groups.
+  epoch_log_pattern: '^Epoch\s+(?P<epoch>\d+):\s+train_loss=(?P<train_loss>[0-9]*\.?[0-9]+),\s+train_loss_c=(?P<train_loss_c>[0-9]*\.?[0-9]+),\s+val_loss=(?P<val_loss>[0-9]*\.?[0-9]+)$'
 params:
   num_feature: 1
   num_embedding: 64
@@ -25,6 +28,12 @@ params:
   weight_decay: 0.00001
   l1_scale: 0.0
   l2_scale: 0.01
+  temperature: 0.5
+  lam: 0.1
+  mode: 'finetune'  # 'pretrain', 'finetune', 'freeze'
+  pretrain_validate_on_train: false
+  finetune_monitor_metric: 'loss'
+  augmentation_strength: 0.1
 
   use_gpu: true
   checkpoint_path: null

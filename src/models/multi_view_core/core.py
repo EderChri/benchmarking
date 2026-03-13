@@ -135,3 +135,47 @@ class MultiViewCoreMixin:
                 l1_reg += self.config.l1_scale * param.abs().sum()
                 l2_reg += self.config.l2_scale * param.pow(2).sum()
         return l1_reg + l2_reg
+
+    def _set_mode_for_encoder_and_head(self, head_module):
+        mode = getattr(self.config, "mode", "finetune")
+
+        if mode == "pretrain":
+            self.encoder.train()
+            for param in self.encoder.parameters():
+                param.requires_grad = True
+
+        elif mode == "finetune":
+            self.encoder.train()
+            for param in self.encoder.parameters():
+                param.requires_grad = True
+            head_module.train()
+
+        elif mode == "freeze":
+            self.encoder.eval()
+            for name, param in self.encoder.named_parameters():
+                param.requires_grad = "input_layer" in name
+            head_module.train()
+
+    def _compute_contrastive_encoder_loss(
+        self,
+        batch_xt,
+        batch_dx,
+        batch_xf,
+        batch_xt_aug,
+        batch_dx_aug,
+        batch_xf_aug,
+    ):
+        ht, hd, hf, zt, zd, zf = self.encoder(batch_xt, batch_dx, batch_xf)
+        _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(batch_xt_aug, batch_dx_aug, batch_xf_aug)
+
+        loss_t = self.info_criterion(zt, zt_aug)
+        loss_d = self.info_criterion(zd, zd_aug)
+        loss_f = self.info_criterion(zf, zf_aug)
+
+        contrastive_loss = self._compute_loss_by_type(loss_t, loss_d, loss_f) + self._weight_regularization(
+            self.encoder
+        )
+        return (ht, hd, hf, zt, zd, zf), contrastive_loss
+
+    def _compose_finetune_loss(self, contrastive_loss, supervised_loss, head_module):
+        return self.config.lam * contrastive_loss + supervised_loss + self._weight_regularization(head_module)

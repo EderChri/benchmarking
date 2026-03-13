@@ -20,3 +20,4 @@ src/data/energy_power/*
 original_paper/* 
 .env
 *.log
+mlruns/

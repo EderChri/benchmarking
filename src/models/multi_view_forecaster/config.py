@@ -24,6 +24,12 @@ class MultiViewForecasterConfig(ForecasterConfig):
 		patience: int = 20,
 		l1_scale: float = 0.0,
 		l2_scale: float = 0.01,
+		temperature: float = 0.5,
+		lam: float = 0.1,
+		mode: str = "finetune",
+		pretrain_validate_on_train: bool = False,
+		finetune_monitor_metric: str = "loss",
+		augmentation_strength: float = 0.1,
 		use_gpu: bool = True,
 		checkpoint_path: Optional[str] = None,
 		**kwargs,
@@ -53,4 +59,10 @@ class MultiViewForecasterConfig(ForecasterConfig):
 		self.use_gpu = use_gpu
 		self.checkpoint_path = checkpoint_path
 
+		self.temperature = temperature
+		self.lam = lam
+		self.mode = mode
+		self.pretrain_validate_on_train = pretrain_validate_on_train
+		self.finetune_monitor_metric = finetune_monitor_metric
+		self.augmentation_strength = augmentation_strength
 		super().__init__(target_seq_index=target_seq_index, **kwargs)

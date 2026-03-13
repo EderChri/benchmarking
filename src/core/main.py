@@ -18,7 +18,7 @@ from core.cache import PreprocessingCache
 from core.data_pipeline import DataPipeline
 from core.factory import ComponentFactory
 from core.metric_evaluator import MetricEvaluator
-from core.mlop_tracker import MlopTracker
+from core.mlflow_tracker import MlflowTracker
 from core.results_manager import ResultsManager
 from core.task_executor import TaskExecutor
 from core.visualizer import Visualizer
@@ -38,7 +38,7 @@ class BenchmarkRunner:
         self.factory = ComponentFactory(config_dir)
         self.pipeline = DataPipeline(self.factory, cache, test_mode)
         self.executor = TaskExecutor()
-        self.tracker = MlopTracker()
+        self.tracker = MlflowTracker()
 
     def _set_seed(self, seed: int):
         random.seed(seed)
@@ -175,7 +175,13 @@ class BenchmarkRunner:
 
                 if not existing:
                     self.tracker.log({"status": 2, "stage": "training"}, step=2)
-                    model = self.executor.train(model, run["task"], splits)
+                    model = self.executor.train(
+                        model,
+                        run["task"],
+                        splits,
+                        tracker=self.tracker,
+                        model_config=configs.get("model"),
+                    )
 
                 # Save non-HashCheckpointModel models (HashCheckpointModel saves internally during train)
                 save_dir = current_save_dir

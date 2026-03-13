@@ -126,31 +126,11 @@ class MultiViewClassifier(MultiViewCoreMixin, HashCheckpointModel, SupervisedCla
 
     def _set_training_mode(self):
         """Set models to appropriate training mode"""
-        if self.config.mode == "pretrain":
-            self.encoder.train()
-            for param in self.encoder.parameters():
-                param.requires_grad = True
-
-        elif self.config.mode == "finetune":
-            self.encoder.train()
-            for param in self.encoder.parameters():
-                param.requires_grad = True
-            self.classifier.train()
-
-        elif self.config.mode == "freeze":
-            self.encoder.eval()
-            for name, param in self.encoder.named_parameters():
-                if "input_layer" in name:
-                    param.requires_grad = True
-                else:
-                    param.requires_grad = False
-            self.classifier.train()
+        self._set_mode_for_encoder_and_head(self.classifier)
 
     def _train_epoch(self, loader):
         """Modified to take a loader directly for reuse with val_loader"""
-        self.encoder.train()
-        if self.config.mode != "pretrain":
-            self.classifier.train()
+        self._set_training_mode()
 
         total_loss = 0.0
         total_loss_c = 0.0
@@ -171,27 +151,22 @@ class MultiViewClassifier(MultiViewCoreMixin, HashCheckpointModel, SupervisedCla
                 self.clf_optimizer.zero_grad()
 
             with autocast("cuda", enabled=True):
-                # Forward passes
-                ht, hd, hf, zt, zd, zf = self.encoder(
-                    batch_xt, batch_dx, batch_xf)
-                _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(
-                    batch_xt_aug, batch_dx_aug, batch_xf_aug)
-
-                # Contrastive losses
-                loss_t = self.info_criterion(zt, zt_aug)
-                loss_d = self.info_criterion(zd, zd_aug)
-                loss_f = self.info_criterion(zf, zf_aug)
-
-                loss = self._compute_loss_by_type(loss_t, loss_d, loss_f) + \
-                    self._weight_regularization(self.encoder)
+                # Forward passes and contrastive base loss
+                (ht, hd, hf, zt, zd, zf), loss = self._compute_contrastive_encoder_loss(
+                    batch_xt,
+                    batch_dx,
+                    batch_xf,
+                    batch_xt_aug,
+                    batch_dx_aug,
+                    batch_xf_aug,
+                )
 
                 loss_c_val = 0.0
                 if self.config.mode != "pretrain":
                     logits = self.classifier(
                         zt, zd, zf) if self.config.feature == "latent" else self.classifier(ht, hd, hf)
                     loss_c = nn.CrossEntropyLoss()(logits, batch_y.long())
-                    loss = self.config.lam * loss + loss_c + \
-                        self._weight_regularization(self.classifier)
+                    loss = self._compose_finetune_loss(loss, loss_c, self.classifier)
                     loss_c_val = loss_c.item()
 
             self.scaler.scale(loss).backward()
@@ -228,29 +203,22 @@ class MultiViewClassifier(MultiViewCoreMixin, HashCheckpointModel, SupervisedCla
 
                 # 2. Forward pass with mixed precision (consistent with _train_epoch)
                 with autocast("cuda", enabled=True):
-                    # Original and Augmented forward passes
-                    ht, hd, hf, zt, zd, zf = self.encoder(
-                        batch_xt, batch_dx, batch_xf)
-                    _, _, _, zt_aug, zd_aug, zf_aug = self.encoder(
-                        batch_xt_aug, batch_dx_aug, batch_xf_aug
+                    # Original and Augmented forward passes + contrastive base loss
+                    (ht, hd, hf, zt, zd, zf), loss = self._compute_contrastive_encoder_loss(
+                        batch_xt,
+                        batch_dx,
+                        batch_xf,
+                        batch_xt_aug,
+                        batch_dx_aug,
+                        batch_xf_aug,
                     )
-
-                    # 3. Calculate Contrastive Losses using self.info_criterion
-                    loss_t = self.info_criterion(zt, zt_aug)
-                    loss_d = self.info_criterion(zd, zd_aug)
-                    loss_f = self.info_criterion(zf, zf_aug)
-
-                    # 4. Combine domain losses using the helper method
-                    loss = self._compute_loss_by_type(loss_t, loss_d, loss_f) + \
-                        self._weight_regularization(self.encoder)
 
                     # 5. Add Supervised loss if not in pretrain mode
                     if self.config.mode != "pretrain":
                         logits = self.classifier(
                             zt, zd, zf) if self.config.feature == "latent" else self.classifier(ht, hd, hf)
                         loss_c = self.criterion(logits, batch_y.long())
-                        loss = self.config.lam * loss + loss_c + \
-                            self._weight_regularization(self.classifier)
+                        loss = self._compose_finetune_loss(loss, loss_c, self.classifier)
 
                 val_loss += loss.item() * batch_xt.size(0)
                 total_samples += batch_xt.size(0)
