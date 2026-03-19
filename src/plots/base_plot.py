@@ -7,5 +7,5 @@ class BasePlot(ABC):
         self.params = params
 
     @abstractmethod
-    def plot(self, run_ids: List[int], artifacts: List[Dict], output_path: Path):
+    def plot(self, run_ids: List[int], artifacts: List[Dict], output_path: Path, **kwargs):
         pass

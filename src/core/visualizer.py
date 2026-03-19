@@ -34,7 +34,8 @@ class Visualizer:
             plot_cfg = self.factory.get_component_by_name(entry["plot_type"], "plots")
             plotter = self.factory.instantiate(plot_cfg, "plots")
             out = self.plots_dir / f"vis_{i + 1}_{entry['plot_type']}.png"
-            plotter.plot(entry["runs"], artifacts, out)
+            extra = {k: v for k, v in entry.items() if k not in ("runs", "plot_type")}
+            plotter.plot(entry["runs"], artifacts, out, **extra)
             logger.info(f"Saved: {out}")
             outputs.append({"path": out, "run_sources": run_sources, "plot_type": entry["plot_type"]})
         return outputs

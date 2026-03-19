@@ -18,7 +18,7 @@ class PointPlot(BasePlot):
         threshold = values.quantile(float(quantile))
         return values >= threshold
 
-    def plot(self, run_ids, artifacts, output_path):
+    def plot(self, run_ids, artifacts, output_path, **_):
         fig, ax = plt.subplots(figsize=self.params.get("figsize", [12, 5]))
         alpha = self.params.get("alpha", 0.8)
         ms = self.params.get("marker_size", 4)
