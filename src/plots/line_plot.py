@@ -1,5 +1,14 @@
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from plots.base_plot import BasePlot
+
+_DAY_ABBR = {0: "Mo", 1: "Tu", 2: "We", 3: "Th", 4: "Fr", 5: "Sa", 6: "Su"}
+
+
+def _day_date_formatter(x, pos):
+    dt = mdates.num2date(x)
+    return f"{_DAY_ABBR[dt.weekday()]}\n{dt.strftime('%Y-%m-%d')}"
 
 class LinePlot(BasePlot):
     def _prediction_anomaly_mask(self, art, pred_df):
@@ -91,6 +100,8 @@ class LinePlot(BasePlot):
             if pred is not None:
                 pred_df = pred.to_pd()
                 ax.plot(pred_df.index, pred_df.iloc[:, 0], linestyle="--", label=f"{name} (prediction signal)", alpha=alpha)
+        ax.xaxis.set_major_formatter(FuncFormatter(_day_date_formatter))
+        fig.autofmt_xdate(rotation=0, ha="center")
         ax.legend(); ax.grid(True)
         fig.savefig(output_path, bbox_inches="tight")
         plt.close(fig)
