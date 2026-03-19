@@ -34,6 +34,12 @@ params:
   pretrain_validate_on_train: false
   finetune_monitor_metric: 'loss'
   augmentation_strength: 0.1
+  train_stride: 1
+  max_train_windows: null
+  samplewise_windows_per_sample: 1
+  samplewise_train_sampling: 'random'
+  samplewise_eval_sampling: 'center'
+  samplewise_stride: 1
 
   use_gpu: true
   checkpoint_path: null

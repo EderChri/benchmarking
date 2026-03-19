@@ -18,14 +18,24 @@ class HermiteCubicDerivativeTransform(TransformBase):
         Args:
             numeric_only: If True, only compute derivatives for numeric columns
         """
-        super().__init__()
-        self.numeric_only = numeric_only
         if "paper_mode" in kwargs:
             samplewise_mode = kwargs.pop("paper_mode")
+        super().__init__()
+        self.numeric_only = numeric_only
         self.samplewise_mode = samplewise_mode
         self.num_feature = int(num_feature)
+        self.kwargs = {
+            "numeric_only": numeric_only,
+            "samplewise_mode": samplewise_mode,
+            "num_feature": num_feature,
+        }
         self._original_names = None
         self._numeric_columns = None
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["name"] = f"{type(self).__module__}:{type(self).__name__}"
+        return d
     
     @property
     def requires_inversion_state(self):
@@ -135,14 +145,15 @@ class HermiteCubicDerivativeTransform(TransformBase):
         
         return TimeSeries.from_pd(result_df)
     
+    @property
+    def requires_inversion_state(self):
+        return False
+
     def _invert(self, time_series: TimeSeries) -> TimeSeries:
-        """Remove derivative columns to recover original series"""
-        if self.inversion_state is None:
-            raise RuntimeError("Transform must be applied before inversion")
-        
         df = time_series.to_pd()
-        original_cols = self.inversion_state['original_columns']
-        
-        # Keep only original columns
+        if self.inversion_state is not None:
+            original_cols = self.inversion_state['original_columns']
+        else:
+            original_cols = [c for c in df.columns if not str(c).endswith("_derivative")]
         result_df = df[[col for col in original_cols if col in df.columns]]
         return TimeSeries.from_pd(result_df)

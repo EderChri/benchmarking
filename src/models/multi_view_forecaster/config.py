@@ -30,6 +30,12 @@ class MultiViewForecasterConfig(ForecasterConfig):
 		pretrain_validate_on_train: bool = False,
 		finetune_monitor_metric: str = "loss",
 		augmentation_strength: float = 0.1,
+		train_stride: int = 1,
+		max_train_windows: Optional[int] = None,
+		samplewise_windows_per_sample: int = 1,
+		samplewise_train_sampling: str = "random",
+		samplewise_eval_sampling: str = "center",
+		samplewise_stride: int = 1,
 		use_gpu: bool = True,
 		checkpoint_path: Optional[str] = None,
 		**kwargs,
@@ -65,4 +71,10 @@ class MultiViewForecasterConfig(ForecasterConfig):
 		self.pretrain_validate_on_train = pretrain_validate_on_train
 		self.finetune_monitor_metric = finetune_monitor_metric
 		self.augmentation_strength = augmentation_strength
+		self.train_stride = train_stride
+		self.max_train_windows = max_train_windows
+		self.samplewise_windows_per_sample = samplewise_windows_per_sample
+		self.samplewise_train_sampling = samplewise_train_sampling
+		self.samplewise_eval_sampling = samplewise_eval_sampling
+		self.samplewise_stride = samplewise_stride
 		super().__init__(target_seq_index=target_seq_index, **kwargs)

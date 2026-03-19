@@ -15,10 +15,20 @@ class NormalizeColumnsExcludingSuffixesTransform(TransformBase):
         self.excluded_suffixes = excluded_suffixes or ["_derivative", "_fft"]
         self.samplewise_mode = samplewise_mode
         self.num_feature = int(num_feature)
+        self.kwargs = {
+            "excluded_suffixes": self.excluded_suffixes,
+            "samplewise_mode": samplewise_mode,
+            "num_feature": num_feature,
+        }
         self._norm = MeanVarNormalize()
         self._cols = None
         self._mean = None
         self._std = None
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["name"] = f"{type(self).__module__}:{type(self).__name__}"
+        return d
 
     @property
     def requires_inversion_state(self):
@@ -51,6 +61,21 @@ class NormalizeColumnsExcludingSuffixesTransform(TransformBase):
             df.loc[:, self._cols] = normed.values
         return TimeSeries.from_pd(df)
 
+    def _invert(self, time_series: TimeSeries) -> TimeSeries:
+        """Reverse the normalization to restore original scale."""
+        df = time_series.to_pd().copy()
+        if not self._cols:
+            return TimeSeries.from_pd(df)
+        if self.samplewise_mode:
+            x = self._reshape_nld(df[self._cols].values)
+            x = x * self._std + self._mean
+            df.loc[:, self._cols] = self._flatten_nld(x)
+        else:
+            # Use Merlion's MeanVarNormalize inversion
+            denormed = self._norm._invert(TimeSeries.from_pd(df[self._cols])).to_pd()
+            df.loc[:, self._cols] = denormed.values
+        return TimeSeries.from_pd(df)
+
     def _reshape_nld(self, values_2d: np.ndarray) -> np.ndarray:
         arr = np.asarray(values_2d, dtype=float)
         if arr.ndim != 2:
@@ -81,6 +106,11 @@ class NormalizeColumnsBySuffixTransform(TransformBase):
         self._mean = None
         self._std = None
 
+    def to_dict(self):
+        d = super().to_dict()
+        d["name"] = f"{type(self).__module__}:{type(self).__name__}"
+        return d
+
     @property
     def requires_inversion_state(self):
         return False
@@ -107,6 +137,21 @@ class NormalizeColumnsBySuffixTransform(TransformBase):
         else:
             normed = self._norm(TimeSeries.from_pd(df[self._cols])).to_pd()
             df.loc[:, self._cols] = normed.values
+        return TimeSeries.from_pd(df)
+
+    def _invert(self, time_series: TimeSeries) -> TimeSeries:
+        """Reverse the normalization to restore original scale."""
+        df = time_series.to_pd().copy()
+        if not self._cols:
+            return TimeSeries.from_pd(df)
+        if self.samplewise_mode:
+            x = self._reshape_nld(df[self._cols].values)
+            x = x * self._std + self._mean
+            df.loc[:, self._cols] = self._flatten_nld(x)
+        else:
+            # Use Merlion's MeanVarNormalize inversion
+            denormed = self._norm._invert(TimeSeries.from_pd(df[self._cols])).to_pd()
+            df.loc[:, self._cols] = denormed.values
         return TimeSeries.from_pd(df)
 
     def _reshape_nld(self, values_2d: np.ndarray) -> np.ndarray:

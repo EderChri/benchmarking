@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 from merlion.utils import TimeSeries
 
 @dataclass

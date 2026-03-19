@@ -112,7 +112,7 @@ class TaskExecutor:
         return method(model, test_data)
 
     def _forecast(self, model, test_data):
-        result = model.forecast(time_stamps=test_data.time_stamps)
+        result = model.forecast(time_stamps=test_data.time_stamps, time_series_prev=test_data)
         return result[0] if isinstance(result, tuple) else result
 
     def _anomaly(self, model, test_data):

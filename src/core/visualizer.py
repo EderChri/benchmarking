@@ -17,15 +17,29 @@ class Visualizer:
     def run(self, vis_config_path: Path):
         with open(vis_config_path) as f:
             config = yaml.safe_load(f)
+        outputs = []
         for i, entry in enumerate(config.get("experiments", [])):
-            artifacts = [self._load_run(rid) for rid in entry["runs"]]
+            run_sources = []
+            artifacts = []
+            for rid in entry["runs"]:
+                artifact, run_dir = self._load_run(rid)
+                artifacts.append(artifact)
+                run_sources.append(
+                    {
+                        "run_id": rid,
+                        # This mirrors the value stored in MLflow param `results_dir`.
+                        "results_dir": str(run_dir.parent),
+                    }
+                )
             plot_cfg = self.factory.get_component_by_name(entry["plot_type"], "plots")
             plotter = self.factory.instantiate(plot_cfg, "plots")
             out = self.plots_dir / f"vis_{i + 1}_{entry['plot_type']}.png"
             plotter.plot(entry["runs"], artifacts, out)
             logger.info(f"Saved: {out}")
+            outputs.append({"path": out, "run_sources": run_sources, "plot_type": entry["plot_type"]})
+        return outputs
 
-    def _load_run(self, run_id: int) -> Dict:
+    def _resolve_run_dir(self, run_id: int) -> Path:
         run_dir = self.results_dir / str(run_id)
         if not (run_dir / "result.yaml").exists():
             index_path = Path("src/results/index.yaml")
@@ -37,7 +51,10 @@ class Visualizer:
                     indexed_dir = index.get(str(run_id))
                 if indexed_dir:
                     run_dir = Path(indexed_dir)
+        return run_dir
 
+    def _load_run(self, run_id: int) -> Dict:
+        run_dir = self._resolve_run_dir(run_id)
         with open(run_dir / "result.yaml") as f:
             result = yaml.safe_load(f)
         for fname, key in [
@@ -49,4 +66,4 @@ class Visualizer:
             if p.exists():
                 with open(p, "rb") as f:
                     result[key] = pickle.load(f)
-        return result
+        return result, run_dir

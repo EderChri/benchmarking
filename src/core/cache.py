@@ -24,6 +24,11 @@ class PreprocessingCache:
         suffix = "_labels.pkl" if is_label else ".pkl"
         return self._preproc_dir() / f"{split}{suffix}"
 
+    def _preprocessor_path(self) -> Path:
+        return self._preproc_dir() / "preprocessor.pkl"
+    def _preprocessor_path(self) -> Path:
+        return self._preproc_dir() / "preprocessor.pkl"
+
     def exists(self, data_cfg, preproc_cfg, task, target=None) -> bool:
         self._compute_cache_key(data_cfg, preproc_cfg, task, target)
         return all(self._path(s).exists() for s in ["train", "test"]) and (self._preproc_dir() / "meta.yaml").exists()
@@ -35,6 +40,7 @@ class PreprocessingCache:
         train_data = self._load(self._path("train"))
         test_data = self._load(self._path("test"))
         val_data = self._load(self._path("val")) if meta["has_validation"] else None
+        preprocessor = self._load(self._preprocessor_path()) if self._preprocessor_path().exists() else None
         if meta["has_labels"]:
             return DataSplits(
                 train_data, test_data, val_data,
@@ -42,8 +48,9 @@ class PreprocessingCache:
                 test_labels=self._load(self._path("test", is_label=True)),
                 val_labels=self._load(self._path("val", is_label=True)) if meta["has_validation"] else None,
                 has_labels=True,
+                preprocessor=preprocessor,
             )
-        return DataSplits(train_data, test_data, val_data, has_labels=False)
+        return DataSplits(train_data, test_data, val_data, has_labels=False, preprocessor=preprocessor)
 
     def save(self, data_cfg, preproc_cfg, task, splits: DataSplits, target=None):
         self._compute_cache_key(data_cfg, preproc_cfg, task, target)
@@ -52,6 +59,8 @@ class PreprocessingCache:
             self._save(data, self._path(split))
         if splits.val_data is not None:
             self._save(splits.val_data, self._path("val"))
+        if splits.preprocessor is not None:
+            self._save(splits.preprocessor, self._preprocessor_path())
         if splits.has_labels:
             for split, labels in [("train", splits.train_labels), ("test", splits.test_labels)]:
                 self._save(labels, self._path(split, is_label=True))

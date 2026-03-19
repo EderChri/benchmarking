@@ -199,6 +199,7 @@ class BenchmarkRunner:
                 self.tracker.watch_model(model)
 
                 predictions = self.executor.predict(run["task"], model, splits.test_data)
+
                 prediction_scores = None
                 if run["task"].lower() == "classification":
                     prediction_scores = self.executor.classification_scores(model, splits.test_data)
@@ -241,7 +242,38 @@ class BenchmarkRunner:
         return results_dir
 
     def visualise(self, results_dir: Path, vis_config: Path = Path("conf/visualizations.yaml")):
-        Visualizer(results_dir).run(vis_config)
+        visualizer = Visualizer(results_dir)
+        outputs = visualizer.run(vis_config)
+
+        if not self.tracker.enabled:
+            return
+
+        mlflow_run_cache = {}
+        for output in outputs:
+            plot_path = output["path"]
+            run_sources = output.get("run_sources", [])
+
+            for source in run_sources:
+                benchmark_run_id = source["run_id"]
+                source_results_dir = source["results_dir"]
+                cache_key = (benchmark_run_id, source_results_dir)
+
+                if cache_key not in mlflow_run_cache:
+                    mlflow_run_cache[cache_key] = self.tracker.find_run_id(
+                        results_dir=source_results_dir,
+                        benchmark_run_id=benchmark_run_id,
+                    )
+
+                mlflow_run_id = mlflow_run_cache.get(cache_key)
+                if not mlflow_run_id:
+                    logger.warning(
+                        f"No MLflow run found for benchmark run {benchmark_run_id} in results_dir '{source_results_dir}'. "
+                        f"Skipping plot artifact '{plot_path}'."
+                    )
+                    continue
+
+                self.tracker.log_artifact_to_run(mlflow_run_id, vis_config, artifact_path="config")
+                self.tracker.log_artifact_to_run(mlflow_run_id, plot_path, artifact_path="plots")
 
 
 if __name__ == "__main__":

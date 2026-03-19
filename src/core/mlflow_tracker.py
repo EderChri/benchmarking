@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 
 logger = logging.getLogger(__name__)
@@ -12,6 +12,7 @@ class MlflowTracker:
     def __init__(self, default_experiment: str = "merlion-benchmarking"):
         self._enabled = False
         self._mlflow = None
+        self._client = None
         self._active_run = None
 
         self._load_env_file()
@@ -25,6 +26,7 @@ class MlflowTracker:
             if self._tracking_uri:
                 self._mlflow.set_tracking_uri(self._tracking_uri)
             self._mlflow.set_experiment(self._experiment)
+            self._client = self._mlflow.tracking.MlflowClient()
             self._enabled = True
         except Exception as exc:
             logger.warning(f"mlflow import/init failed; tracking disabled. Reason: {exc}")
@@ -156,6 +158,62 @@ class MlflowTracker:
                 self._mlflow.log_metrics(numeric, step=step)
             except Exception as exc:
                 logger.warning(f"mlflow log_metrics failed: {exc}")
+
+    def log_artifact(self, local_path: Union[Path, str], artifact_path: Optional[str] = None):
+        if not self._active_run:
+            return
+
+        try:
+            self._mlflow.log_artifact(str(local_path), artifact_path=artifact_path)
+        except Exception as exc:
+            logger.warning(f"mlflow log_artifact failed for '{local_path}': {exc}")
+
+    def log_artifacts(self, local_dir: Union[Path, str], artifact_path: Optional[str] = None):
+        if not self._active_run:
+            return
+
+        path = Path(local_dir)
+        if not path.exists() or not path.is_dir():
+            return
+
+        try:
+            self._mlflow.log_artifacts(str(path), artifact_path=artifact_path)
+        except Exception as exc:
+            logger.warning(f"mlflow log_artifacts failed for '{local_dir}': {exc}")
+
+    def find_run_id(self, results_dir: Union[Path, str], benchmark_run_id: Union[int, str]) -> Optional[str]:
+        if not self._enabled or not self._client:
+            return None
+
+        try:
+            experiment = self._mlflow.get_experiment_by_name(self._experiment)
+            if not experiment:
+                return None
+
+            rs = str(results_dir).replace("'", "\\'")
+            rid = str(benchmark_run_id).replace("'", "\\'")
+            filters = f"params.results_dir = '{rs}' and params.run_id = '{rid}'"
+            runs = self._client.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                filter_string=filters,
+                max_results=1,
+                order_by=["attributes.start_time DESC"],
+            )
+            if not runs:
+                return None
+            return runs[0].info.run_id
+        except Exception as exc:
+            logger.warning(f"mlflow search_runs failed for benchmark run '{benchmark_run_id}': {exc}")
+            return None
+
+    def log_artifact_to_run(self, run_id: str, local_path: Union[Path, str], artifact_path: Optional[str] = None):
+        if not self._enabled or not self._client:
+            return
+
+        try:
+            self._client.log_artifact(run_id=run_id, local_path=str(local_path), artifact_path=artifact_path)
+        except Exception as exc:
+            logger.warning(f"mlflow client log_artifact failed for run '{run_id}', path '{local_path}': {exc}")
 
     def finish_run(self, status: str, runtime: float, error: Optional[str] = None):
         if not self._active_run:

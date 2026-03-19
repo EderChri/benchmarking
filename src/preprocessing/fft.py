@@ -12,14 +12,24 @@ class FFTTransform(TransformBase):
     """
     
     def __init__(self, numeric_only=True, samplewise_mode: bool = False, num_feature: int = 1, **kwargs):
-        super().__init__()
-        self.numeric_only = numeric_only
         if "paper_mode" in kwargs:
             samplewise_mode = kwargs.pop("paper_mode")
+        super().__init__()
+        self.numeric_only = numeric_only
         self.samplewise_mode = samplewise_mode
         self.num_feature = int(num_feature)
+        self.kwargs = {
+            "numeric_only": numeric_only,
+            "samplewise_mode": samplewise_mode,
+            "num_feature": num_feature,
+        }
         self._original_names = None
         self._numeric_columns = None
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["name"] = f"{type(self).__module__}:{type(self).__name__}"
+        return d
     
     @property
     def requires_inversion_state(self):
@@ -88,11 +98,15 @@ class FFTTransform(TransformBase):
         
         return TimeSeries.from_pd(result_df)
     
+    @property
+    def requires_inversion_state(self):
+        return False
+
     def _invert(self, time_series: TimeSeries) -> TimeSeries:
-        if self.inversion_state is None:
-            raise RuntimeError("Transform must be applied before inversion")
-        
         df = time_series.to_pd()
-        original_cols = self.inversion_state['original_columns']
+        if self.inversion_state is not None:
+            original_cols = self.inversion_state['original_columns']
+        else:
+            original_cols = [c for c in df.columns if not str(c).endswith("_fft")]
         result_df = df[[col for col in original_cols if col in df.columns]]
         return TimeSeries.from_pd(result_df)
