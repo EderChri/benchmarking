@@ -69,9 +69,25 @@ class MetricEvaluator:
         metric_input = predictions
         if metric_name.lower() == "auroc_auprc" and prediction_scores is not None:
             metric_input = prediction_scores
+        if task in ["forecasting", "forecast"] and len(metric_input.names) > 1:
+            return self._evaluate_multivariate(metric_fn, ground_truth, metric_input)
         if hasattr(metric_fn, "value"):
             return metric_fn.value(ground_truth=ground_truth, predict=metric_input)
         return metric_fn(ground_truth=ground_truth, predict=metric_input)
+
+    @staticmethod
+    def _evaluate_multivariate(metric_fn, ground_truth, predictions):
+        gt_df = ground_truth.to_pd()
+        pred_df = predictions.to_pd()
+        scores = []
+        for col in pred_df.columns:
+            pred_col = TimeSeries.from_pd(pred_df[[col]])
+            gt_col = TimeSeries.from_pd(gt_df[[col]])
+            if hasattr(metric_fn, "value"):
+                scores.append(metric_fn.value(ground_truth=gt_col, predict=pred_col))
+            else:
+                scores.append(metric_fn(ground_truth=gt_col, predict=pred_col))
+        return sum(scores) / len(scores)
     
     @staticmethod
     def _filter_marked_columns(ts):

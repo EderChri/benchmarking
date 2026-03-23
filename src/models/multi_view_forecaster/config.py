@@ -7,6 +7,7 @@ class MultiViewForecasterConfig(ForecasterConfig):
 	def __init__(
 		self,
 		num_feature: int = 1,
+		num_out_features: int = 1,
 		num_embedding: int = 128,
 		num_hidden: int = 256,
 		num_head: int = 8,
@@ -41,6 +42,7 @@ class MultiViewForecasterConfig(ForecasterConfig):
 		**kwargs,
 	):
 		self.num_feature = num_feature
+		self.num_out_features = num_out_features
 		self.num_embedding = num_embedding
 		self.num_hidden = num_hidden
 		self.num_head = num_head

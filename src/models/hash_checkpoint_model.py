@@ -30,17 +30,14 @@ class HashCheckpointModel(ModelBase):
         self.current_epoch = 0
 
     def _compute_config_hash(self) -> str:
-        """Compute hash of the model config YAML"""
+        """Compute hash from the live runtime config (includes experiment overrides)."""
         if self.config_hash is None:
-            yaml_path = self._get_config_yaml_path()
-
-            with open(yaml_path) as f:
-                cfg = yaml.safe_load(f)
-            yaml_content = yaml.dump(
-                cfg, sort_keys=True, default_flow_style=False)
-            self.config_hash = hashlib.md5(
-                yaml_content.encode()).hexdigest()[:16]
-
+            cfg = {
+                k: v for k, v in vars(self.config).items()
+                if not k.startswith("_") and isinstance(v, (int, float, str, bool, type(None)))
+            }
+            yaml_content = yaml.dump(cfg, sort_keys=True, default_flow_style=False)
+            self.config_hash = hashlib.md5(yaml_content.encode()).hexdigest()[:16]
         return self.config_hash
 
     def _get_config_yaml_path(self) -> str:
@@ -85,17 +82,9 @@ class HashCheckpointModel(ModelBase):
             checkpoint_dir = self._get_checkpoint_dir()
             logger.info(f"Found existing checkpoint at {checkpoint_dir}, loading...")
 
-            # Load using class method
-            yaml_path = self.pretrained_config_path or self._get_config_yaml_path()
-            with open(yaml_path, 'r') as f:
-                config_dict = yaml.safe_load(f)
+            loaded_model = super(HashCheckpointModel, type(self)).load(checkpoint_dir)
 
-            loaded_model = self._load_from_checkpoint(
-                self.save_dir, config_dict)
-
-            # Transfer state to current instance
             self._load_checkpoint_state(loaded_model)
-
             self._checkpoint_loaded = True
             logger.info("Successfully resumed from existing checkpoint")
             return True

@@ -61,6 +61,7 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 		self._context_dx = None
 		self._context_xf = None
 		self._samplewise_mode = False
+		self._feature_names = None
 
 		if not self._try_load_existing_checkpoint():
 			if config.checkpoint_path:
@@ -75,6 +76,7 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 		self._context_dx = getattr(loaded_model, "_context_dx", None)
 		self._context_xf = getattr(loaded_model, "_context_xf", None)
 		self._samplewise_mode = bool(getattr(loaded_model, "_samplewise_mode", False))
+		self._feature_names = getattr(loaded_model, "_feature_names", None)
 
 		loaded_epoch = getattr(loaded_model, "current_epoch", 0)
 		self.current_epoch = 0 if loaded_epoch is None else int(loaded_epoch)
@@ -82,6 +84,7 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 	def _create_head(self):
 		args = Namespace(
 			num_feature=self.config.num_feature,
+			num_out_features=self.config.num_out_features,
 			num_embedding=self.config.num_embedding,
 			num_hidden=self.config.num_hidden,
 			num_head=self.config.num_head,
@@ -146,7 +149,10 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 			xw_t.append(xt[start : start + window])
 			xw_d.append(dx[start : start + window])
 			xw_f.append(xf[start : start + window])
-			y.append(xt[start + window : start + window + horizon, target_col])
+			if self.config.num_out_features > 1:
+				y.append(xt[start + window : start + window + horizon, :])
+			else:
+				y.append(xt[start + window : start + window + horizon, target_col])
 
 		return (
 			np.asarray(xw_t, dtype=np.float32),
@@ -203,7 +209,10 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 				xw_t.append(xt[sample_idx, start : start + window, :])
 				xw_d.append(dx[sample_idx, start : start + window, :])
 				xw_f.append(xf[sample_idx, start : start + window, :])
-				y.append(xt[sample_idx, start + window : start + window + horizon, target_col])
+				if self.config.num_out_features > 1:
+					y.append(xt[sample_idx, start + window : start + window + horizon, :])
+				else:
+					y.append(xt[sample_idx, start + window : start + window + horizon, target_col])
 
 		return (
 			np.asarray(xw_t, dtype=np.float32),
@@ -334,6 +343,7 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 		if self.config.num_epochs is None:
 			raise ValueError("num_epochs must be set for training")
 
+		self._feature_names = list(train_data.columns[:self.config.num_feature])
 		xt, dx, xf, target_col = self._extract_domains(train_data)
 
 		self._set_training_mode()
@@ -471,21 +481,28 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 				f"Insufficient context length {pos} for window_size={window}."
 			)
 
-		preds = []
+		chunks = []
+		n_collected = 0
 		with torch.no_grad():
-			while len(preds) < horizon:
+			while n_collected < horizon:
 				xt_window = torch.FloatTensor(xt_full[pos - window : pos]).unsqueeze(0).to(self.device)
 				dx_window = torch.FloatTensor(dx_full[pos - window : pos]).unsqueeze(0).to(self.device)
 				xf_window = torch.FloatTensor(xf_full[pos - window : pos]).unsqueeze(0).to(self.device)
-				chunk = self._forward(xt_window, dx_window, xf_window)[0].detach().cpu().tolist()
-				n = min(forecast_horizon, horizon - len(preds))
-				preds.extend(chunk[:n])
+				out = self._forward(xt_window, dx_window, xf_window)[0].detach().cpu().numpy()
+				n = min(forecast_horizon, horizon - n_collected)
+				chunks.append(out[:n])
+				n_collected += n
 				pos = min(pos + forecast_horizon, len(xt_full))
 
+		all_preds = np.concatenate(chunks, axis=0)  # [horizon] or [horizon, num_out]
 		index = pd.to_datetime(time_stamps, unit="s", errors="coerce")
 		if pd.isna(index).all():
 			index = pd.to_datetime(time_stamps, errors="coerce")
-		pred_df = pd.DataFrame(np.asarray(preds).reshape(-1, 1), index=index, columns=["forecast"])
+		if all_preds.ndim == 1:
+			pred_df = pd.DataFrame(all_preds.reshape(-1, 1), index=index, columns=["forecast"])
+		else:
+			cols = self._feature_names or [f"feat_{i}" for i in range(all_preds.shape[1])]
+			pred_df = pd.DataFrame(all_preds, index=index, columns=cols)
 		return pred_df, None
 
 	def _forecast_samplewise(self, time_stamps, time_series_prev: Optional[pd.DataFrame] = None):

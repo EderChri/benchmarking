@@ -6,8 +6,9 @@ class LinearForecastHead(nn.Module):
 	def __init__(self, args):
 		super().__init__()
 		self.args = args
+		self.num_out = getattr(args, 'num_out_features', 1)
 		input_dim = len(args.loss_type) * args.num_hidden
-		self.linear = nn.Linear(input_dim, args.forecast_horizon)
+		self.linear = nn.Linear(input_dim, args.forecast_horizon * self.num_out)
 
 	def _select_domains(self, zt, zd, zf):
 		if self.args.loss_type == "ALL":
@@ -36,4 +37,5 @@ class LinearForecastHead(nn.Module):
 
 		emb = self._select_domains(zt, zd, zf)
 		emb = emb.reshape(emb.shape[0], -1)
-		return self.linear(emb)
+		out = self.linear(emb).reshape(emb.shape[0], self.args.forecast_horizon, self.num_out)
+		return out.squeeze(-1)  # [batch, horizon] if num_out=1, else [batch, horizon, num_out]

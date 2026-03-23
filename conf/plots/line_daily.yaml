@@ -2,6 +2,6 @@ name: LineWindowedPlot
 module: plots.line_windowed_plot
 class: LineWindowedPlot
 params:
-  figsize: [14, 5]
+  figsize: [28, 18]
   alpha: 0.8
   duration: day
