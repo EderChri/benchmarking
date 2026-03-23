@@ -1,3 +1,4 @@
+import fcntl
 import os
 import pickle
 import hashlib
@@ -48,19 +49,23 @@ class PreprocessingCache:
     def save(self, data_cfg, preproc_cfg, task, splits: DataSplits, target=None):
         self._compute_cache_key(data_cfg, preproc_cfg, task, target)
         self._preproc_dir().mkdir(parents=True, exist_ok=True)
-        for split, data in [("train", splits.train_data), ("test", splits.test_data)]:
-            self._save(data, self._path(split))
-        if splits.val_data is not None:
-            self._save(splits.val_data, self._path("val"))
-        if splits.has_labels:
-            for split, labels in [("train", splits.train_labels), ("test", splits.test_labels)]:
-                self._save(labels, self._path(split, is_label=True))
-            if splits.val_labels is not None:
-                self._save(splits.val_labels, self._path("val", is_label=True))
-        yaml.dump({
-            "cache_key": self.cache_key, "has_labels": splits.has_labels,
-            "has_validation": splits.val_data is not None, "task": task, "target": target,
-        }, open(self._preproc_dir() / "meta.yaml", "w"), default_flow_style=False)
+        with open(self._preproc_dir() / ".lock", "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            if self.exists(data_cfg, preproc_cfg, task, target):
+                return  # another process already wrote it while we waited
+            for split, data in [("train", splits.train_data), ("test", splits.test_data)]:
+                self._save(data, self._path(split))
+            if splits.val_data is not None:
+                self._save(splits.val_data, self._path("val"))
+            if splits.has_labels:
+                for split, labels in [("train", splits.train_labels), ("test", splits.test_labels)]:
+                    self._save(labels, self._path(split, is_label=True))
+                if splits.val_labels is not None:
+                    self._save(splits.val_labels, self._path("val", is_label=True))
+            yaml.dump({
+                "cache_key": self.cache_key, "has_labels": splits.has_labels,
+                "has_validation": splits.val_data is not None, "task": task, "target": target,
+            }, open(self._preproc_dir() / "meta.yaml", "w"), default_flow_style=False)
 
     def _save(self, obj, path: Path):
         with open(path, "wb") as f:

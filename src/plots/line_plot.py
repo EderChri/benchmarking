@@ -40,12 +40,13 @@ class LinePlot(BasePlot):
                     return cols
         return None  # univariate or no forecasting run found
 
-    def plot(self, run_ids, artifacts, output_path, **_):
-        alpha = self.params.get("alpha", 0.8)
+    def plot(self, run_ids, artifacts, output_path, **kwargs):
+        params = {**self.params, **kwargs}
+        alpha = params.get("alpha", 0.8)
         feature_cols = self._forecast_feature_cols(run_ids, artifacts)
         n_subplots = len(feature_cols) if feature_cols else 1
-        subplot_height = self.params.get("subplot_height", 16)
-        figsize = self.params.get("figsize", [16, subplot_height * n_subplots])
+        subplot_height = params.get("subplot_height", 16)
+        figsize = params.get("figsize", [16, subplot_height * n_subplots])
         fig, axes = plt.subplots(n_subplots, 1, figsize=figsize, squeeze=False)
 
         n_runs = len(run_ids)

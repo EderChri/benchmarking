@@ -1,11 +1,14 @@
+import argparse
 import logging
 import os
+import subprocess
+import sys
 import time
 import traceback
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 import random
 import numpy as np
@@ -124,7 +127,7 @@ class BenchmarkRunner:
 
 
 
-    def run_experiments(self):
+    def run_experiments(self, run_ids: Optional[List[int]] = None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_dir = Path("src/results") / timestamp
         exp_config = self._load_yaml(self.config_dir / "experiments.yaml")
@@ -132,7 +135,11 @@ class BenchmarkRunner:
         evaluator = MetricEvaluator(self.factory)
         all_results = []
 
-        for run in exp_config["runs"]:
+        runs = exp_config["runs"]
+        if run_ids is not None:
+            runs = [r for r in runs if r["id"] in run_ids]
+
+        for run in runs:
             run_id = run["id"]
             logger.info(f"[Run {run_id}] {run['name']} — {run['task']}")
             if rm.run_exists(run_id):
@@ -276,7 +283,105 @@ class BenchmarkRunner:
                 self.tracker.log_artifact_to_run(mlflow_run_id, plot_path, artifact_path="plots")
 
 
-if __name__ == "__main__":
+def _build_run_chains(runs: list) -> list:
+    """Group runs into independent dependency chains via BFS from each root.
+
+    Fan-out dependencies (one pretrain → many finetunes) are all collected into
+    the same chain and run sequentially on one GPU.
+    """
+    run_ids_in_batch = {r["id"] for r in runs}
+    children: Dict[int, list] = {}
+    for r in runs:
+        parent = r.get("pretrained_run")
+        if parent in run_ids_in_batch:
+            children.setdefault(parent, []).append(r)
+
+    dependents = {r["id"] for r in runs if r.get("pretrained_run") in run_ids_in_batch}
+    chains, visited = [], set()
+
+    for run in runs:
+        rid = run["id"]
+        if rid in visited or rid in dependents:
+            continue
+        chain, queue = [], [run]
+        while queue:
+            current = queue.pop(0)
+            cid = current["id"]
+            if cid in visited:
+                continue
+            chain.append(current)
+            visited.add(cid)
+            queue.extend(children.get(cid, []))
+        chains.append(chain)
+
+    for run in runs:
+        if run["id"] not in visited:
+            chains.append([run])
+
+    return chains
+
+
+def run_parallel(gpu_ids: List[int], run_ids: Optional[List[int]] = None):
+    """Dispatch dependency chains across GPUs; each GPU runs its chain sequentially."""
+    exp_config = yaml.safe_load(open(Path("conf/experiments.yaml")))
+    runs = exp_config["runs"]
+    if run_ids is not None:
+        runs = [r for r in runs if r["id"] in run_ids]
+
+    chains = _build_run_chains(runs)
+    log_dir = Path("src/results/logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Assign chains to GPUs round-robin
+    gpu_assignments: Dict[int, List[List[int]]] = {g: [] for g in gpu_ids}
+    for i, chain in enumerate(chains):
+        gpu_assignments[gpu_ids[i % len(gpu_ids)]].append([r["id"] for r in chain])
+
+    procs = []
+    for gpu, gpu_chains in gpu_assignments.items():
+        if not gpu_chains:
+            continue
+        ids = [rid for chain in gpu_chains for rid in chain]
+        log_file = log_dir / f"gpu{gpu}_runs_{'_'.join(map(str, ids))}.log"
+        logger.info(f"  GPU {gpu}: chains {gpu_chains} → {log_file}")
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+        f = open(log_file, "w")
+        proc = subprocess.Popen(
+            [sys.executable, __file__, "--runs", ",".join(map(str, ids)), "--gpus", str(gpu)],
+            env=env, stdout=f, stderr=subprocess.STDOUT,
+        )
+        procs.append((proc, f, gpu))
+
+    for proc, f, gpu_id in procs:
+        proc.wait()
+        f.close()
+        if proc.returncode != 0:
+            logger.warning(f"Subprocess for GPU {gpu_id} exited with code {proc.returncode}")
+
+    logger.info("All waves complete. Running visualisation...")
+    vis_results_dir = Path("src/results") / datetime.now().strftime("%Y%m%d_%H%M%S")
     runner = BenchmarkRunner(test_mode=False, use_cache=True)
-    results_dir = runner.run_experiments()
-    runner.visualise(results_dir)  # uncomment to visualise after run
+    runner.visualise(vis_results_dir)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runs", type=str, default=None,
+                        help="Comma-separated run IDs to execute, e.g. --runs 17,18")
+    parser.add_argument("--gpus", type=str, default=None,
+                        help="Comma-separated GPU IDs to use, e.g. --gpus 0,1,2")
+    args = parser.parse_args()
+
+    run_ids = [int(x) for x in args.runs.split(",")] if args.runs else None
+    gpu_ids = [int(x) for x in args.gpus.split(",")] if args.gpus else None
+
+    if gpu_ids and len(gpu_ids) > 1:
+        run_parallel(gpu_ids, run_ids)
+    else:
+        if gpu_ids:
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
+        runner = BenchmarkRunner(test_mode=False, use_cache=True)
+        results_dir = runner.run_experiments(run_ids=run_ids)
+        if run_ids is None:
+            runner.visualise(results_dir)

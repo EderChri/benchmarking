@@ -1,3 +1,4 @@
+import fcntl
 import pickle
 import logging
 import yaml
@@ -20,11 +21,13 @@ class ResultsManager:
         return {}
 
     def _update_index(self, run_id: int, run_dir: Path):
-        index = self._load_index()
-        index[run_id] = str(run_dir)
         GLOBAL_INDEX.parent.mkdir(parents=True, exist_ok=True)
-        with open(GLOBAL_INDEX, "w") as f:
-            yaml.dump(index, f, default_flow_style=False)
+        with open(GLOBAL_INDEX.with_suffix(".lock"), "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            index = self._load_index()
+            index[run_id] = str(run_dir)
+            with open(GLOBAL_INDEX, "w") as f:
+                yaml.dump(index, f, default_flow_style=False)
 
     def run_exists(self, run_id: int) -> bool:
         return run_id in self._load_index()

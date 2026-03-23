@@ -74,7 +74,10 @@ class ComponentFactory:
                 if "pretrained_config_path" in inspect.signature(model_cls.__init__).parameters:
                     extra["pretrained_config_path"] = pretrained_config_path
 
-                transferred = model_cls(model_config, save_dir=pretrained_save_dir, **extra)
+                # Use pretrained run's config to reproduce the correct hash for the saved checkpoint
+                pretrain_params = (pretrained_model_config or config).get("params", {})
+                pretrain_config_obj = getattr(module, config["config_class"])(**pretrain_params)
+                transferred = model_cls(pretrain_config_obj, save_dir=pretrained_save_dir, **extra)
                 if not getattr(transferred, "_checkpoint_loaded", False):
                     transferred = None
             else:
