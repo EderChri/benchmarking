@@ -6,3 +6,4 @@ config_class: ArimaConfig
 params:
   max_forecast_steps: 100
   order: [4, 1, 2]
+  rolling_forecast: true

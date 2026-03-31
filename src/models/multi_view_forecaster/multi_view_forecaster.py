@@ -17,7 +17,7 @@ from merlion.utils import TimeSeries
 from models.hash_checkpoint_model import HashCheckpointModel
 from models.multi_view_core import MultiViewCoreMixin
 from models.multi_view_forecaster.config import MultiViewForecasterConfig
-from models.multi_view_forecaster.model import LinearForecastHead
+from models.multi_view_forecaster.model import ForecastHead
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ class MultiViewForecaster(MultiViewCoreMixin, HashCheckpointModel, ForecasterBas
 			feature=self.config.feature,
 			forecast_horizon=self.config.forecast_horizon,
 		)
-		return LinearForecastHead(args)
+		return ForecastHead(args)
 
 	def _load_pretrained_checkpoint(self, checkpoint_path: str):
 		super()._load_pretrained_checkpoint(checkpoint_path)

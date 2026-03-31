@@ -1,0 +1,32 @@
+name: RawForecaster
+source: custom
+module: models.raw_forecaster
+class: RawForecaster
+config_class: RawForecasterConfig
+mlflow:
+  epoch_log_pattern: '^Epoch\s+(?P<epoch>\d+):\s+train_loss=(?P<train_loss>[0-9]*\.?[0-9]+),\s+val_loss=(?P<val_loss>[0-9]*\.?[0-9]+)$'
+params:
+  num_feature: 1
+  num_out_features: 1
+  num_embedding: 64
+  num_hidden: 128
+  dropout: 0.2
+
+  window_size: 48
+  forecast_horizon: 24
+  target_seq_index: 0
+
+  batch_size: 128
+  num_epochs: 200
+  patience: 20
+  lr: 0.001
+  weight_decay: 0.00001
+  train_stride: 1
+  max_train_windows: null
+
+  # marker: '_derivative'  # columns containing this string are ignored with a warning, default in utils.config.py
+
+  use_gpu: true
+  checkpoint_path: null
+
+  max_forecast_steps: null

@@ -100,7 +100,7 @@ class TaskExecutor:
         finally:
             root_logger.removeHandler(handler)
 
-    def predict(self, task: str, model: ModelBase, test_data: TimeSeries):
+    def predict(self, task: str, model: ModelBase, splits: "DataSplits", model_config: dict = None):
         dispatch = {
             "forecasting": self._forecast, "forecast": self._forecast,
             "anomaly_detection": self._anomaly, "anomaly": self._anomaly,
@@ -109,17 +109,45 @@ class TaskExecutor:
         method = dispatch.get(task.lower())
         if not method:
             raise ValueError(f"Unknown task type: {task}")
-        return method(model, test_data)
+        return method(model, splits, model_config)
 
-    def _forecast(self, model, test_data):
-        result = model.forecast(time_stamps=test_data.time_stamps, time_series_prev=test_data)
+    def _forecast(self, model, splits, model_config):
+        from models.hash_checkpoint_model import HashCheckpointModel
+        if isinstance(model, HashCheckpointModel):
+            result = model.forecast(time_stamps=splits.test_data.time_stamps, time_series_prev=splits.test_data)
+            return result[0] if isinstance(result, tuple) else result
+        if (model_config or {}).get("params", {}).get("rolling_forecast", False):
+            return self._rolling_forecast(model, splits)
+        result = model.forecast(time_stamps=splits.test_data.time_stamps, time_series_prev=None)
         return result[0] if isinstance(result, tuple) else result
 
-    def _anomaly(self, model, test_data):
-        return model.get_anomaly_score(test_data)
+    def _rolling_forecast(self, model, splits):
+        import pandas as pd
+        step = getattr(model.config, "max_forecast_steps", None) or 1
+        # Build initial context from train + val
+        ctx_df = splits.train_data.to_pd()
+        if splits.val_data is not None:
+            ctx_df = pd.concat([ctx_df, splits.val_data.to_pd()])
+        ctx = TimeSeries.from_pd(ctx_df)
 
-    def _classify(self, model, test_data):
-        return model.predict(test_data)
+        test_df = splits.test_data.to_pd()
+        chunks = []
+        i = 0
+        while i < len(test_df):
+            chunk_df = test_df.iloc[i:i + step]
+            chunk_ts = TimeSeries.from_pd(chunk_df)
+            result = model.forecast(time_stamps=chunk_ts.time_stamps, time_series_prev=ctx)
+            pred = result[0] if isinstance(result, tuple) else result
+            chunks.append(pred.to_pd())
+            ctx = TimeSeries.from_pd(pd.concat([ctx_df, test_df.iloc[: i + step]]))
+            i += step
+        return TimeSeries.from_pd(pd.concat(chunks))
+
+    def _anomaly(self, model, splits, model_config):
+        return model.get_anomaly_score(splits.test_data)
+
+    def _classify(self, model, splits, model_config):
+        return model.predict(splits.test_data)
 
     def classification_scores(self, model: ModelBase, test_data: TimeSeries):
         if hasattr(model, "get_classification_score"):

@@ -1,7 +1,27 @@
 experiments:
   - plot_type: "line"
-    runs: [1, 2]
+    runs: [24]
+    subplot_height: 8
+  - plot_type: "line"
+    runs: [25]
+  # - plot_type: "line"
+  #   runs: [18]
+  # - plot_type: "line"
+  #   runs: [20]
+  #   subplot_height: 8
+  # - plot_type: "line_weekly"
+  #   runs: [18]
+  #   start_time: "2018-03-01"
+  # - plot_type: "line_weekly"
+  #   runs: [18]
+  #   start_time: "2018-03-07"
+  # - plot_type: "line_weekly"
+  #   runs: [18]
+  #   start_time: "2018-03-14"
+  # - plot_type: "line_daily"
+  #   runs: [18]
+  #   start_time: "2018-03-01"
 
   # - plot_type: "point"
   #   runs: [1]
-  
+

@@ -78,68 +78,83 @@ runs:
   #       params:
   #         num_epochs: 10
 
-  - id: 4
-    name: "Pretrain SleepEEG_MultiViewClassifier"
-    task: "classification"
-    data: "sleep_eeg"
-    model: "multi_view_classifier"
-    target: 1
-    preprocessor: "multi_view_contrastive"
-    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
-    overrides:
-      model:
-        params:
-          mode: "pretrain"
-          num_epochs: 200
-          num_target: 5
-      metrics:
-        auroc_auprc:
-          params:
-            num_classes: 5
+  # - id: 4
+  #   name: "Pretrain SleepEEG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         num_epochs: 200
+  #         num_target: 5
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
 
-  - id: 5
-    name: "Finetune EMG_MultiViewClassifier"
-    task: "classification"
-    data: "emg"
-    model: "multi_view_classifier"
-    target: 1
-    pretrained_run: 4
-    skip_training: False
-    preprocessor: "multi_view_contrastive"
-    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
-    overrides:
-      model:
-        params:
-           mode: "finetune"
-           batch_size: 16
-           num_epochs: 100
-           num_target: 3
-      metrics:
-        auroc_auprc:
-          params:
-            num_classes: 3
+  # - id: 5
+  #   name: "Finetune EMG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   pretrained_run: 4
+  #   skip_training: False
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #          mode: "finetune"
+  #          batch_size: 16
+  #          num_epochs: 100
+  #          num_target: 3
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
     
-  - id: 6
-    name: "Finetune EMG_MultiViewClassifier"
-    task: "classification"
-    data: "emg"
-    model: "multi_view_classifier"
-    target: 1
-    pretrained_run: 4
-    skip_training: False
-    preprocessor: "multi_view_contrastive"
-    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
-    overrides:
-      model:
-        params:
-           mode: "freeze"
-           batch_size: 16
-           num_epochs: 100
-           num_target: 3
-      metrics:
-        auroc_auprc:
-          params:
-            num_classes: 3
+  # - id: 6
+  #   name: "Finetune EMG_MultiViewClassifier"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_classifier"
+  #   target: 1
+  #   pretrained_run: 4
+  #   skip_training: False
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #          mode: "freeze"
+  #          batch_size: 16
+  #          num_epochs: 100
+  #          num_target: 3
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # - id: 7
+  #   name: "SelfSupervised EMG_MultiViewDetector"
+  #   task: "anomaly"
+  #   data: "emg"
+  #   model: "multi_view_detector"
+  #   target: 1
+  #   preprocessor: "multi_view_contrastive"
+  #   metrics: ["pointwise_precision", "pointwise_recall", "pointwise_f1"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         batch_size: 16
+  #         num_epochs: 10
+  #         threshold_quantile: 0.99
 
   # - id: 7
   #   name: "Pretrain SleepEEG_MultiViewClassifier"
@@ -178,3 +193,407 @@ runs:
   #       auroc_auprc:
   #         params:
   #           num_classes: 3
+
+    # - id: 11
+    #   name: "M4_Daily_MultiViewForecaster"
+    #   task: "forecasting"
+    #   data: "m4_daily"
+    #   model: "multi_view_forecaster"
+    #   preprocessor: "multi_view_constrastive_non_samplewise"
+    #   metrics: ["rmse", "smape", "mae"]
+    #   overrides:
+    #     model:
+    #       params:
+    #         num_epochs: 200
+    #         batch_size: 128
+    #         mode: "pretrain"
+    #         use_gpu: true
+    
+    # - id: 12
+    #   name: "M4_Daily_MultiViewForecaster"
+    #   task: "forecasting"
+    #   data: "m4_hourly"
+    #   model: "multi_view_forecaster"
+    #   pretrained_run: 11
+    #   skip_training: False
+    #   preprocessor: "multi_view_constrastive_non_samplewise"
+    #   metrics: ["rmse", "smape", "mae"]
+    #   overrides:
+    #     model:
+    #       params:
+    #         num_epochs: 100
+    #         batch_size: 16
+    #         mode: "finetune"
+    #         use_gpu: true
+
+  # --- ETTh Univariate (OT only) ---
+  #   - id: 15
+  #     name: "ETTh1_MultiViewForecaster_Univariate"
+  #     task: "forecasting"
+  #     data: "etth1"
+  #     model: "multi_view_forecaster"
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       data:
+  #         target_columns: ["OT"]
+  #       model:
+  #         params:
+  #           num_feature: 1
+  #           num_output_feature: 1
+  #           num_epochs: 200
+  #           batch_size: 128
+  #           mode: "pretrain"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+  #           target_seq_index: 0
+
+  #   - id: 16
+  #     name: "ETTh2_MultiViewForecaster_Univariate"
+  #     task: "forecasting"
+  #     data: "etth2"
+  #     model: "multi_view_forecaster"
+  #     pretrained_run: 15
+  #     skip_training: False
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       data:
+  #         target_columns: ["OT"]
+  #       model:
+  #         params:
+  #           num_feature: 1
+  #           num_output_feature: 1
+  #           num_epochs: 100
+  #           batch_size: 16
+  #           mode: "finetune"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+  #           target_seq_index: 0
+
+  # # --- ETTh Multivariate (all 7 features → all 7 features) ---
+  #   - id: 17
+  #     name: "ETTh1_MultiViewForecaster_Multivariate"
+  #     task: "forecasting"
+  #     data: "etth1"
+  #     model: "multi_view_forecaster"
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       model:
+  #         params:
+  #           num_feature: 7
+  #           num_out_features: 7
+  #           num_epochs: 200
+  #           batch_size: 128
+  #           mode: "pretrain"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+
+  #   - id: 18
+  #     name: "ETTh2_MultiViewForecaster_Multivariate"
+  #     task: "forecasting"
+  #     data: "etth2"
+  #     model: "multi_view_forecaster"
+  #     pretrained_run: 17
+  #     skip_training: False
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       model:
+  #         params:
+  #           num_feature: 7
+  #           num_out_features: 7
+  #           num_epochs: 100
+  #           batch_size: 16
+  #           mode: "finetune"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+
+  # # --- ETTm Univariate (OT only) ---
+  #   - id: 19
+  #     name: "ETTm1_MultiViewForecaster_Univariate"
+  #     task: "forecasting"
+  #     data: "ettm1"
+  #     model: "multi_view_forecaster"
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       data:
+  #         target_columns: ["OT"]
+  #       model:
+  #         params:
+  #           num_feature: 1
+  #           num_output_feature: 1
+  #           num_epochs: 200
+  #           batch_size: 128
+  #           mode: "pretrain"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+  #           target_seq_index: 0
+
+  #   - id: 20
+  #     name: "ETTm2_MultiViewForecaster_Univariate"
+  #     task: "forecasting"
+  #     data: "ettm2"
+  #     model: "multi_view_forecaster"
+  #     pretrained_run: 19
+  #     skip_training: False
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       data:
+  #         target_columns: ["OT"]
+  #       model:
+  #         params:
+  #           num_feature: 1
+  #           num_output_feature: 1
+  #           num_epochs: 100
+  #           batch_size: 16
+  #           mode: "finetune"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+  #           target_seq_index: 0
+
+  # # --- ETTm Multivariate (all 7 feature) ---
+  #   - id: 21
+  #     name: "ETTm1_MultiViewForecaster_Multivariate"
+  #     task: "forecasting"
+  #     data: "ettm1"
+  #     model: "multi_view_forecaster"
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       model:
+  #         params:
+  #           num_feature: 7
+  #           num_out_features: 7
+  #           num_epochs: 200
+  #           batch_size: 128
+  #           mode: "pretrain"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+
+  #   - id: 22
+  #     name: "ETTm2_MultiViewForecaster_Multivariate"
+  #     task: "forecasting"
+  #     data: "ettm2"
+  #     model: "multi_view_forecaster"
+  #     pretrained_run: 21
+  #     skip_training: False
+  #     preprocessor: "multi_view_constrastive_non_samplewise"
+  #     metrics: ["rmse", "smape", "mae"]
+  #     overrides:
+  #       model:
+  #         params:
+  #           num_feature: 7
+  #           num_out_features: 7
+  #           num_epochs: 100
+  #           batch_size: 16
+  #           mode: "finetune"
+  #           train_stride: 48
+  #           use_gpu: true
+  #           window_size: 96
+  #           forecast_horizon: 96
+
+#  --- Experiment 24: RawForecaster on ettm2 Daily ---
+#     - id: 24 
+#       name: "ETTm2_RawForecaster_Univariate"
+#       task: "forecasting"
+#       data: "ettm2"     
+#       model: "raw_forecaster"         
+#       preprocessor: "no_preproc" 
+#       metrics: ["rmse", "smape", "mae"]
+#       overrides:
+#         data:
+#           target_columns: ["OT"]
+
+#     # --- Experiment 25: RawForecaster on ettm2 Multivariate ---
+#     - id: 25
+#       name: "ETTm2_RawForecaster_Multivariate"
+#       task: "forecasting"
+#       data: "ettm2"
+#       model: "raw_forecaster"
+#       preprocessor: "no_preproc"
+#       metrics: ["rmse", "smape", "mae"]
+#       overrides:
+#         model:
+#           params:
+#             num_feature: 7      # all ETTm2 features: HUFL, HULL, MUFL, MULL, LUFL, LULL, OT
+#             num_out_features: 7 # forecast all features; set to 1 to predict only target_seq_index
+
+  # ==========================================================================
+  # RawForecaster comparisons for runs 19/20 (univariate) and 21/22 (multivariate)
+  # Each group has three conditions:
+  #   A) Train on ETTm1, finetune on ETTm2  (transfer, comparable to 20 / 22)
+  #   B) Train from scratch on ETTm2        (no-transfer baseline)
+  #   C) Train on ETTm1, skip training on ETTm2 (zero-shot transfer)
+  # ==========================================================================
+
+  # --- Univariate (OT only) ---
+
+    - id: 26
+      name: "ETTm1_RawForecaster_Univariate_Train"
+      task: "forecasting"
+      data: "ettm1"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      overrides:
+        data:
+          target_columns: ["OT"]
+        model:
+          params:
+            num_feature: 1
+            num_epochs: 200
+            num_out_features: 1
+            window_size: 96
+            forecast_horizon: 96
+            train_stride: 48
+
+    - id: 27
+      name: "ETTm2_RawForecaster_Univariate_Finetune"
+      task: "forecasting"
+      data: "ettm2"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      pretrained_run: 26
+      overrides:
+        data:
+          target_columns: ["OT"]
+        model:
+          params:
+            num_feature: 1
+            num_epochs: 100
+            num_out_features: 1
+            window_size: 96
+            forecast_horizon: 96
+            train_stride: 48
+
+    - id: 28
+      name: "ETTm2_RawForecaster_Univariate_Scratch"
+      task: "forecasting"
+      data: "ettm2"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      overrides:
+        data:
+          target_columns: ["OT"]
+        model:
+          params:
+            num_feature: 1
+            num_epochs: 200
+            num_out_features: 1
+            window_size: 96
+            forecast_horizon: 96
+            train_stride: 48
+
+    - id: 29
+      name: "ETTm2_RawForecaster_Univariate_ZeroShot"
+      task: "forecasting"
+      data: "ettm2"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      pretrained_run: 26
+      skip_training: true
+      overrides:
+        data:
+          target_columns: ["OT"]
+        model:
+          params:
+            num_feature: 1
+            num_out_features: 1
+            window_size: 96
+            forecast_horizon: 96
+            train_stride: 48
+
+  # --- Multivariate (all 7 features) ---
+
+    - id: 30
+      name: "ETTm1_RawForecaster_Multivariate_Train"
+      task: "forecasting"
+      data: "ettm1"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      overrides:
+        model:
+          params:
+            num_feature: 7
+            num_out_features: 7
+            window_size: 96
+            num_epochs: 200
+            forecast_horizon: 96
+            train_stride: 48
+
+    - id: 31
+      name: "ETTm2_RawForecaster_Multivariate_Finetune"
+      task: "forecasting"
+      data: "ettm2"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      pretrained_run: 30
+      overrides:
+        model:
+          params:
+            num_feature: 7
+            num_out_features: 7
+            window_size: 96
+            num_epochs: 100
+            forecast_horizon: 96
+            train_stride: 48
+
+    - id: 32
+      name: "ETTm2_RawForecaster_Multivariate_Scratch"
+      task: "forecasting"
+      data: "ettm2"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      overrides:
+        model:
+          params:
+            num_feature: 7
+            num_out_features: 7
+            window_size: 96
+            forecast_horizon: 96
+            num_epochs: 100
+            train_stride: 48
+
+    - id: 33
+      name: "ETTm2_RawForecaster_Multivariate_ZeroShot"
+      task: "forecasting"
+      data: "ettm2"
+      model: "raw_forecaster"
+      preprocessor: "no_preproc"
+      metrics: ["rmse", "smape", "mae"]
+      pretrained_run: 30
+      skip_training: true
+      overrides:
+        model:
+          params:
+            num_feature: 7
+            num_out_features: 7
+            window_size: 96
+            forecast_horizon: 96
+            train_stride: 48
+
+    #

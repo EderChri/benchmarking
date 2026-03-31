@@ -180,7 +180,7 @@ class BenchmarkRunner:
                 if pretrained_run_id:
                     model.current_epoch = 0  # ensure epoch starts at 0 for pretrained runs
 
-                if not existing:
+                if not existing and not run.get("skip_training", False):
                     self.tracker.log({"status": 2, "stage": "training"}, step=2)
                     model = self.executor.train(
                         model,
@@ -189,6 +189,8 @@ class BenchmarkRunner:
                         tracker=self.tracker,
                         model_config=configs.get("model"),
                     )
+                elif run.get("skip_training", False) and hasattr(model, "set_context"):
+                    model.set_context(splits.train_data.to_pd())
 
                 # Save non-HashCheckpointModel models (HashCheckpointModel saves internally during train)
                 save_dir = current_save_dir
@@ -205,7 +207,7 @@ class BenchmarkRunner:
                 # Important: watch model only after all checkpoint serialization is done.
                 self.tracker.watch_model(model)
 
-                predictions = self.executor.predict(run["task"], model, splits.test_data)
+                predictions = self.executor.predict(run["task"], model, splits, model_config=configs.get("model"))
 
                 prediction_scores = None
                 if run["task"].lower() == "classification":
