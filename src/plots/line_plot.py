@@ -43,6 +43,7 @@ class LinePlot(BasePlot):
     def plot(self, run_ids, artifacts, output_path, **kwargs):
         params = {**self.params, **kwargs}
         alpha = params.get("alpha", 0.8)
+        actual_color = params.get("actual_color", "black")
         feature_cols = self._forecast_feature_cols(run_ids, artifacts)
         n_subplots = len(feature_cols) if feature_cols else 1
         subplot_height = params.get("subplot_height", 4)
@@ -50,11 +51,12 @@ class LinePlot(BasePlot):
         fig, axes = plt.subplots(n_subplots, 1, figsize=figsize, squeeze=False)
 
         n_runs = len(run_ids)
+        plotted_actual = set()  # subplot keys for which actual has already been drawn
+
         for run_id, art in zip(run_ids, artifacts):
             name = art.get("experiment", f"run_{run_id}")
             task = str(art.get("run_cfg", {}).get("task", "")).lower()
             pred = art.get("predictions")
-            label_actual = "Actual" if n_runs == 1 else f"{name} – actual"
             label_pred = "Predicted" if n_runs == 1 else f"{name} – predicted"
 
             if task in ["forecast", "forecasting"] and (td := art.get("test_data")) is not None:
@@ -65,14 +67,19 @@ class LinePlot(BasePlot):
                     for i, col in enumerate(feature_cols):
                         ax = axes[i][0]
                         ax.set_title(col)
-                        if col in test_df.columns:
-                            ax.plot(test_df.index, test_df[col], linestyle="-", label=label_actual, alpha=alpha)
+                        if col in test_df.columns and i not in plotted_actual:
+                            ax.plot(test_df.index, test_df[col], linestyle="-", color=actual_color,
+                                    label="Actual", alpha=alpha)
+                            plotted_actual.add(i)
                         if pred_df is not None and col in pred_df.columns:
                             ax.plot(pred_df.index, pred_df[col], linestyle="--", label=label_pred, alpha=alpha)
                 else:
                     ax = axes[0][0]
                     ax.set_title(test_df.columns[0])
-                    ax.plot(test_df.index, test_df.iloc[:, 0], linestyle="-", label=label_actual, alpha=alpha)
+                    if 0 not in plotted_actual:
+                        ax.plot(test_df.index, test_df.iloc[:, 0], linestyle="-", color=actual_color,
+                                label="Actual", alpha=alpha)
+                        plotted_actual.add(0)
                     if pred_df is not None:
                         ax.plot(pred_df.index, pred_df.iloc[:, 0], linestyle="--", label=label_pred, alpha=alpha)
                 continue

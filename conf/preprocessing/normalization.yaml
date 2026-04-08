@@ -1,5 +1,5 @@
-name: Normalization
+name: MeanVarNormalization
 source: merlion
-module: transform
-class: Normalize
+module: normalize
+class: MeanVarNormalize
 params: {}
