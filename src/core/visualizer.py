@@ -43,17 +43,28 @@ class Visualizer:
 
     def _resolve_run_dir(self, run_id: int) -> Path:
         run_dir = self.results_dir / str(run_id)
-        if not (run_dir / "result.yaml").exists():
-            index_path = Path("src/results/index.yaml")
-            if index_path.exists():
-                with open(index_path) as f:
-                    index = yaml.safe_load(f) or {}
-                indexed_dir = index.get(run_id)
-                if indexed_dir is None:
-                    indexed_dir = index.get(str(run_id))
-                if indexed_dir:
-                    run_dir = Path(indexed_dir)
-        return run_dir
+        if (run_dir / "result.yaml").exists():
+            return run_dir
+
+        index_path = Path("src/results/index.yaml")
+        if index_path.exists():
+            with open(index_path) as f:
+                index = yaml.safe_load(f) or {}
+            indexed_dir = index.get(run_id) or index.get(str(run_id))
+            if indexed_dir and (Path(indexed_dir) / "result.yaml").exists():
+                return Path(indexed_dir)
+
+        # Last resort: scan filesystem for the most recently modified result
+        candidates = sorted(
+            Path("src/results").glob(f"*/{run_id}/result.yaml"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            logger.warning(f"Run {run_id} not in index; using filesystem match: {candidates[0].parent}")
+            return candidates[0].parent
+
+        return run_dir  # let the caller raise FileNotFoundError
 
     def _load_run(self, run_id: int) -> Dict:
         run_dir = self._resolve_run_dir(run_id)

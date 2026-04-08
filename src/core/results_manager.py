@@ -30,7 +30,10 @@ class ResultsManager:
                 yaml.dump(index, f, default_flow_style=False)
 
     def run_exists(self, run_id: int) -> bool:
-        return run_id in self._load_index()
+        index = self._load_index()
+        if run_id not in index:
+            return False
+        return (Path(index[run_id]) / "result.yaml").exists()
 
     def _build_checkpoint_path(self, save_dir: Optional[str], config_hash: Optional[str]) -> Optional[str]:
         if not save_dir:

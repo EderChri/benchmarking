@@ -45,7 +45,7 @@ class LinePlot(BasePlot):
         alpha = params.get("alpha", 0.8)
         feature_cols = self._forecast_feature_cols(run_ids, artifacts)
         n_subplots = len(feature_cols) if feature_cols else 1
-        subplot_height = params.get("subplot_height", 16)
+        subplot_height = params.get("subplot_height", 4)
         figsize = params.get("figsize", [16, subplot_height * n_subplots])
         fig, axes = plt.subplots(n_subplots, 1, figsize=figsize, squeeze=False)
 
