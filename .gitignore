@@ -21,3 +21,4 @@ original_paper/*
 .env
 *.log
 mlruns/
+*.tex

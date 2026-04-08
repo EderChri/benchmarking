@@ -12,6 +12,10 @@ Usage:
 
     # Export to CSV
     python src/utils/results_table.py --logs src/results/logs/*.log --finetune-only --csv out.csv
+
+    # Export to LaTeX
+    python src/utils/results_table.py 20 27 28 29 --latex out.tex
+    python src/utils/results_table.py --logs src/results/logs/*.log --finetune-only --latex out.tex
 """
 
 import argparse
@@ -237,6 +241,53 @@ def write_csv(rows, path):
     print(f"Saved to {path}")
 
 
+def write_latex(rows, path):
+    if not rows:
+        return
+    fixed = ["id", "name", "status", "model", "data"]
+    metric_cols = sorted({k for row in rows for k in row if k not in fixed})
+    cols = fixed + metric_cols
+
+    def escape(s):
+        return (
+            str(s)
+            .replace("&", r"\&")
+            .replace("%", r"\%")
+            .replace("_", r"\_")
+            .replace("#", r"\#")
+            .replace("{", r"\{")
+            .replace("}", r"\}")
+            .replace("~", r"\textasciitilde{}")
+            .replace("^", r"\^{}")
+        )
+
+    col_spec = "l" * len(fixed) + "r" * len(metric_cols)
+    header = " & ".join(escape(c) for c in cols) + r" \\"
+
+    lines = [
+        r"\begin{table}[ht]",
+        r"\centering",
+        r"\begin{tabular}{" + col_spec + "}",
+        r"\toprule",
+        header,
+        r"\midrule",
+    ]
+    for row in rows:
+        cells = [escape(format_value(row.get(c))) for c in cols]
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [
+        r"\bottomrule",
+        r"\end{tabular}",
+        r"\caption{Experiment results}",
+        r"\label{tab:results}",
+        r"\end{table}",
+    ]
+
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"LaTeX table saved to {path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Compare results across experiment runs.")
     parser.add_argument("runs", nargs="*", type=int, help="Run IDs to compare (optional when --logs is given)")
@@ -245,6 +296,7 @@ def main():
                         help="Skip pretrain/source-domain runs (reads conf/experiments.yaml)")
     parser.add_argument("--metrics", nargs="+", help="Only show these metric columns")
     parser.add_argument("--csv", metavar="FILE", help="Also write output to a CSV file")
+    parser.add_argument("--latex", metavar="FILE", help="Also write output to a LaTeX table file")
     args = parser.parse_args()
 
     if not args.runs and not args.logs:
@@ -254,6 +306,8 @@ def main():
     print_table(rows)
     if args.csv:
         write_csv(rows, args.csv)
+    if args.latex:
+        write_latex(rows, args.latex)
 
 
 if __name__ == "__main__":
