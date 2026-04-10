@@ -1,0 +1,2 @@
+from .multi_view_log_sig_classifier import MultiViewLogSigClassifier
+from .config import MultiViewLogSigClassifierConfig

@@ -1,0 +1,79 @@
+# Full samplewise preprocessor with within-window time augmentation for logsig.
+#
+# Identical to log_sig_windowed_samplewise.yaml except WindowedLogSigTransform
+# runs with use_time_augmentation: true.  This prepends a [0..1] time channel
+# within each rolling window before computing the log-signature, making the
+# result non-trivial even for univariate series (num_feature=1) by introducing
+# Lévy-area cross-terms between the time channel and the feature.
+#
+# With time augmentation, path_dim = num_feature + 1, so logsig_dim is larger:
+#   num_feature=1, depth=2  →  path_dim=2  →  logsig_dim=3
+#   num_feature=1, depth=3  →  path_dim=2  →  logsig_dim=5
+#
+# All four domain views (xt, dx, xf, logsig) are stored in one cache entry.
+# The model's `views` list selects which to use.
+
+transforms:
+  # 1. Normalise raw (xt) columns only.
+  - class: NormalizeColumnsExcludingSuffixesTransform
+    module: domain_normalize
+    source: custom
+    params:
+      excluded_suffixes: ["derivative", "fft", "logsig"]
+      samplewise_mode: true
+      num_feature: 1
+
+  # 2. Hermite-cubic derivative → _MV_derivative columns.
+  - class: HermiteCubicDerivativeTransform
+    module: hermite_cubic_derivative
+    source: custom
+    params:
+      samplewise_mode: true
+      num_feature: 1
+
+  # 3. Normalise derivative columns.
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "derivative"
+      samplewise_mode: true
+      num_feature: 1
+
+  # 4. FFT → _MV_fft columns.
+  - class: FFTTransform
+    module: fft
+    source: custom
+    params:
+      samplewise_mode: true
+      num_feature: 1
+
+  # 5. Normalise FFT columns.
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "fft"
+      samplewise_mode: true
+      num_feature: 1
+
+  # 6. Windowed log-signature with time augmentation → _MV_logsig columns.
+  - class: WindowedLogSigTransform
+    module: log_sig_transform
+    source: custom
+    params:
+      depth: 2
+      inner_window: 24
+      use_time_augmentation: true
+      samplewise_mode: true
+      num_feature: 1
+      numeric_only: true
+
+  # 7. Normalise logsig columns.
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "logsig"
+      samplewise_mode: true
+      num_feature: 1

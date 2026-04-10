@@ -1,0 +1,25 @@
+name: RawClassifier
+source: custom
+module: models.raw_classifier
+class: RawClassifier
+config_class: RawClassifierConfig
+mlflow:
+  epoch_log_pattern: '^Epoch\s+(?P<epoch>\d+):\s+Train Loss:\s+(?P<train_loss>[0-9]*\.?[0-9]+),\s+Val Loss:\s+(?P<val_loss>[0-9]*\.?[0-9]+)(?:,\s+Val Acc:\s+(?P<val_acc>[0-9]*\.?[0-9]+))?$'
+params:
+  num_feature: 1
+  num_target: 4
+
+  batch_size: 128
+  num_epochs: 200
+  patience: 20
+  lr: 0.001
+  weight_decay: 0.00001
+  l2_scale: 0.01
+
+  input_mode: 'raw'   # 'raw' (xt only) | 'multiview' (xt + dx + xf)
+  finetune_monitor_metric: 'accuracy'
+  use_gpu: true
+
+  max_score: 1.0
+  enable_calibrator: true
+  enable_threshold: true

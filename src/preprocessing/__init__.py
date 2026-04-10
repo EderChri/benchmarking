@@ -1,6 +1,7 @@
 from . import fft
 from . import hermite_cubic_derivative
 from . import domain_normalize
+from . import log_sig_transform
 
 import inspect
 import sys

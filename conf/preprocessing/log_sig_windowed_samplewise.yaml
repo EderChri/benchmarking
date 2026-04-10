@@ -1,0 +1,80 @@
+# Full samplewise preprocessor — all domain views precomputed in one pass.
+#
+# Computes xt (normalised), dx (derivative), xf (FFT), and logsig (windowed
+# log-signature) columns in a single cached dataset.  The model's `views` list
+# selects which columns to actually use at training time; unused domain columns
+# are simply ignored.  This means all ablations (xt+dx, xt+logsig, xt+dx+logsig,
+# all four, etc.) share one cache entry and do not require separate preprocessing.
+#
+# Parameters to set per experiment via overrides:
+#   num_feature   — D, the number of raw features per timestep
+#   depth         — log-signature truncation depth (default 2)
+#   inner_window  — rolling window for log-sig computation (default 24)
+#
+# use_time_augmentation: false here; use log_sig_time_aug_samplewise.yaml if
+# within-window time augmentation is desired for the logsig computation.
+
+transforms:
+  # 1. Normalise raw (xt) columns only.
+  - class: NormalizeColumnsExcludingSuffixesTransform
+    module: domain_normalize
+    source: custom
+    params:
+      excluded_suffixes: ["derivative", "fft", "logsig"]
+      samplewise_mode: true
+      num_feature: 1
+
+  # 2. Hermite-cubic derivative → _MV_derivative columns.
+  - class: HermiteCubicDerivativeTransform
+    module: hermite_cubic_derivative
+    source: custom
+    params:
+      samplewise_mode: true
+      num_feature: 1
+
+  # 3. Normalise derivative columns.
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "derivative"
+      samplewise_mode: true
+      num_feature: 1
+
+  # 4. FFT → _MV_fft columns.
+  - class: FFTTransform
+    module: fft
+    source: custom
+    params:
+      samplewise_mode: true
+      num_feature: 1
+
+  # 5. Normalise FFT columns.
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "fft"
+      samplewise_mode: true
+      num_feature: 1
+
+  # 6. Windowed log-signature → _MV_logsig columns.
+  - class: WindowedLogSigTransform
+    module: log_sig_transform
+    source: custom
+    params:
+      depth: 2
+      inner_window: 24
+      use_time_augmentation: false
+      samplewise_mode: true
+      num_feature: 1
+      numeric_only: true
+
+  # 7. Normalise logsig columns.
+  - class: NormalizeColumnsBySuffixTransform
+    module: domain_normalize
+    source: custom
+    params:
+      suffix: "logsig"
+      samplewise_mode: true
+      num_feature: 1

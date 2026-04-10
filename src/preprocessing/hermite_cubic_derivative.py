@@ -81,7 +81,7 @@ class HermiteCubicDerivativeTransform(TransformBase):
         df = time_series.to_pd()
 
         if self.samplewise_mode:
-            base_cols = [c for c in df.columns if not str(c).endswith("_derivative") and not str(c).endswith("_fft")]
+            base_cols = [c for c in df.columns if marker not in str(c)]
             arr = df[base_cols].values.astype(float)
             n, cols = arr.shape
             d = max(1, self.num_feature)
@@ -98,7 +98,7 @@ class HermiteCubicDerivativeTransform(TransformBase):
             spline = torchcde.CubicSpline(coeffs, t)
             dx = spline.derivative(t).numpy().reshape(n, cols)
 
-            derivative_cols = [f"{c}_derivative" for c in base_cols]
+            derivative_cols = [f"{c}{marker}derivative" for c in base_cols]
             existing = [c for c in derivative_cols if c in df.columns]
             if existing:
                 df = df.drop(columns=existing)
@@ -154,6 +154,6 @@ class HermiteCubicDerivativeTransform(TransformBase):
         if self.inversion_state is not None:
             original_cols = self.inversion_state['original_columns']
         else:
-            original_cols = [c for c in df.columns if not str(c).endswith("_derivative")]
+            original_cols = [c for c in df.columns if marker not in str(c) or not str(c).endswith("derivative")]
         result_df = df[[col for col in original_cols if col in df.columns]]
         return TimeSeries.from_pd(result_df)

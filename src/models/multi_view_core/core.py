@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 
 from .encoder import Encoder
+from utils.config import marker
 
 
 class MultiViewCoreMixin:
@@ -45,10 +46,10 @@ class MultiViewCoreMixin:
             return values_2d[:, :, np.newaxis]
 
         original_cols = [
-            c for c in time_series.columns if not c.endswith("_derivative") and not c.endswith("_fft")
+            c for c in time_series.columns if marker not in str(c)
         ]
-        derivative_cols = [c for c in time_series.columns if c.endswith("_derivative")]
-        fft_cols = [c for c in time_series.columns if c.endswith("_fft")]
+        derivative_cols = [c for c in time_series.columns if marker in str(c) and str(c).endswith("derivative")]
+        fft_cols = [c for c in time_series.columns if marker in str(c) and str(c).endswith("fft")]
 
         xt = (
             time_series[original_cols].values
@@ -64,10 +65,10 @@ class MultiViewCoreMixin:
         num_feature = max(1, int(getattr(self.config, "num_feature", 1)))
 
         original_cols = [
-            c for c in time_series.columns if not c.endswith("_derivative") and not c.endswith("_fft")
+            c for c in time_series.columns if marker not in str(c)
         ]
-        derivative_cols = [c for c in time_series.columns if c.endswith("_derivative")]
-        fft_cols = [c for c in time_series.columns if c.endswith("_fft")]
+        derivative_cols = [c for c in time_series.columns if marker in str(c) and str(c).endswith("derivative")]
+        fft_cols = [c for c in time_series.columns if marker in str(c) and str(c).endswith("fft")]
 
         xt = (
             time_series[original_cols].values.astype(np.float32)

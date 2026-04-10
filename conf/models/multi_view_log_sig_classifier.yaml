@@ -1,0 +1,60 @@
+name: MultiViewLogSigClassifier
+source: custom
+module: models.multi_view_log_sig_classifier
+class: MultiViewLogSigClassifier
+config_class: MultiViewLogSigClassifierConfig
+mlflow:
+  epoch_log_pattern: '^Epoch\s+(?P<epoch>\d+):\s+train_loss=(?P<train_loss>[0-9]*\.?[0-9]+),\s+train_loss_c=(?P<train_loss_c>[0-9]*\.?[0-9]+),\s+val_loss=(?P<val_loss>[0-9]*\.?[0-9]+)(?:,\s+val_acc=(?P<val_acc>[0-9]*\.?[0-9]+))?$'
+params:
+  # Views to use.  Any subset of ["xt", "dx", "xf", "logsig"].
+  # Default reproduces the original MultiViewClassifier behaviour.
+  # All four views can coexist in the cache; the model picks which to use.
+  views: ["xt", "dx", "xf"]
+
+  # Set to 0 to infer logsig_dim automatically from the preprocessed data.
+  logsig_dim: 0
+
+  # Architecture
+  num_feature: 1        # D — raw features per timestep (exclude domain cols)
+  num_embedding: 64
+  num_hidden: 128
+  num_head: 4
+  num_layers: 3
+  num_target: 4         # number of classes
+  dropout: 0.2
+  feature: "hidden"     # "latent" or "hidden"
+
+  # Training
+  batch_size: 128
+  num_epochs: 200
+  patience: 20
+  lr: 0.001
+  weight_decay: 0.00001
+  l1_scale: 0.0
+  l2_scale: 0.01
+
+  # Contrastive loss — set lam > 0 to enable (e.g. lam: 0.1 for pretrain).
+  lam: 0.0
+  temperature: 0.07
+
+  # Per-view augmentation types: "gaussian", "spectral", or "none".
+  # Only applied when lam > 0.
+  augmentation:
+    xt: "gaussian"
+    dx: "gaussian"
+    xf: "spectral"
+    logsig: "none"
+  augmentation_strength: 0.1
+
+  # Mode: "pretrain" (contrastive only), "finetune" (both), "freeze" (head only)
+  mode: "finetune"
+  pretrain_validate_on_train: false
+  finetune_monitor_metric: "accuracy"
+
+  use_gpu: true
+  checkpoint_path: null
+
+  # DetectorConfig
+  max_score: 1.0
+  enable_calibrator: true
+  enable_threshold: true
