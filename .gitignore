@@ -21,4 +21,6 @@ original_paper/*
 .env
 *.log
 mlruns/
+lightning_logs/
 *.tex
+*.old

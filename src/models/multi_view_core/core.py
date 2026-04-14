@@ -61,7 +61,9 @@ class MultiViewCoreMixin:
 
         return _reshape_domain(xt), _reshape_domain(dx), _reshape_domain(xf)
 
-    def _extract_domains_matrix(self, time_series: pd.DataFrame):
+    def _extract_domains_matrix(self, time_series):
+        if not isinstance(time_series, pd.DataFrame):
+            time_series = time_series.to_pd()
         num_feature = max(1, int(getattr(self.config, "num_feature", 1)))
 
         original_cols = [

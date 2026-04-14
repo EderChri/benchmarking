@@ -25,8 +25,9 @@ from core.mlflow_tracker import MlflowTracker
 from core.results_manager import ResultsManager
 from core.task_executor import TaskExecutor
 from core.visualizer import Visualizer
-from models.hash_checkpoint_model import HashCheckpointModel
-from models.model_checkpoint import save_model, compute_model_hash, get_checkpoint_dir
+from lightning import LightningModule
+from models.model_checkpoint import save_model, get_checkpoint_dir, compute_model_hash
+from models.base import _config_hash
 
 warnings.filterwarnings("ignore", message="'H' is deprecated")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -127,10 +128,11 @@ class BenchmarkRunner:
 
 
 
-    def run_experiments(self, run_ids: Optional[List[int]] = None):
+    def run_experiments(self, run_ids: Optional[List[int]] = None, exp_config: Optional[Dict[str, Any]] = None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_dir = Path("src/results") / timestamp
-        exp_config = self._load_yaml(self.config_dir / "experiments.yaml")
+        if exp_config is None:
+            exp_config = self._load_yaml(self.config_dir / "experiments.yaml")
         rm = ResultsManager(results_dir)
         evaluator = MetricEvaluator(self.factory)
         all_results = []
@@ -147,6 +149,7 @@ class BenchmarkRunner:
                 all_results.append(rm.load_run(run_id))
                 continue
 
+            self._set_seed(run.get("seed", 42))
             start = time.time()
             tracking_started = False
             try:
@@ -177,9 +180,6 @@ class BenchmarkRunner:
                     pretrained_model_config=pretrained_model_config,
                     save_dir_override=current_save_dir,
                 )
-                if pretrained_run_id:
-                    model.current_epoch = 0  # ensure epoch starts at 0 for pretrained runs
-
                 if not existing and not run.get("skip_training", False):
                     self.tracker.log({"status": 2, "stage": "training"}, step=2)
                     model = self.executor.train(
@@ -192,17 +192,18 @@ class BenchmarkRunner:
                 elif run.get("skip_training", False) and hasattr(model, "set_context"):
                     model.set_context(splits.train_data.to_pd())
 
-                # Save non-HashCheckpointModel models (HashCheckpointModel saves internally during train)
+                # LightningModule (custom) models save internally via ModelCheckpoint.
+                # Only Merlion stat models need an external save call.
                 save_dir = current_save_dir
-                if not isinstance(model, HashCheckpointModel) and not existing:
-
+                if not isinstance(model, LightningModule) and not existing:
                     save_model(model, save_dir, configs["model"])
 
-                config_hash = compute_model_hash(configs["model"])
-                if isinstance(model, HashCheckpointModel):
-                    checkpoint_path = model._get_checkpoint_dir() if hasattr(model, "_get_checkpoint_dir") else None
+                if isinstance(model, LightningModule):
+                    checkpoint_path = str(model.checkpoint_path) if model.checkpoint_path else None
+                    config_hash = _config_hash(model.config)
                 else:
                     checkpoint_path = str(get_checkpoint_dir(save_dir, configs["model"]))
+                    config_hash = compute_model_hash(configs["model"])
 
                 # Important: watch model only after all checkpoint serialization is done.
                 self.tracker.watch_model(model)
@@ -323,43 +324,98 @@ def _build_run_chains(runs: list) -> list:
     return chains
 
 
-def run_parallel(gpu_ids: List[int], run_ids: Optional[List[int]] = None):
-    """Dispatch dependency chains across GPUs; each GPU runs its chain sequentially."""
-    exp_config = yaml.safe_load(open(Path("conf/experiments.yaml")))
+def _chain_num_devices(chain: list, config_dir: Path) -> int:
+    """Return the num_devices requested by the first run in a chain.
+
+    Reads the model YAML and applies any overrides from the run config so that
+    ``overrides.model.params.num_devices`` is respected.  Falls back to 1.
+    """
+    run = chain[0]
+    try:
+        model_name = run.get("model")
+        if not model_name:
+            return 1
+        model_yaml = yaml.safe_load((config_dir / "models" / f"{model_name}.yaml").read_text())
+        base = model_yaml.get("params", {}).get("num_devices", 1)
+        override = (
+            run.get("overrides", {}).get("model", {}).get("params", {}).get("num_devices", base)
+        )
+        return int(override)
+    except Exception:
+        return 1
+
+
+def run_parallel(gpu_ids: List[int], run_ids: Optional[List[int]] = None,
+                 config_path: Path = Path("conf/experiments.yaml")):
+    """Dispatch dependency chains across the available GPU pool.
+
+    Single-GPU chains (num_devices=1) are assigned one GPU from the pool
+    round-robin, matching the previous behaviour.
+
+    Multi-GPU chains (num_devices=N) consume N consecutive GPUs from the
+    pool for that subprocess, which then runs Trainer with DDP across them.
+    CUDA_VISIBLE_DEVICES is set to all N physical GPU IDs so that PL/NCCL
+    can address them as devices 0…N-1 within the subprocess.
+
+    If a chain requests more GPUs than remain in the pool it falls back to
+    using all remaining GPUs (minimum 1).
+    """
+    config_dir = config_path.parent
+    exp_config = yaml.safe_load(config_path.read_text())
     runs = exp_config["runs"]
     if run_ids is not None:
-        runs = [r for r in runs if r["id"] in run_ids]
+        runs = [r for r in runs if r.get("id") in run_ids]
 
     chains = _build_run_chains(runs)
     log_dir = Path("src/results/logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Assign chains to GPUs round-robin
-    gpu_assignments: Dict[int, List[List[int]]] = {g: [] for g in gpu_ids}
-    for i, chain in enumerate(chains):
-        gpu_assignments[gpu_ids[i % len(gpu_ids)]].append([r["id"] for r in chain])
+    # Build a mutable pool of available GPU IDs (in order).
+    gpu_pool = list(gpu_ids)
+
+    # Each entry: (gpu_id_list, chain_run_ids)
+    assignments: List[tuple] = []
+
+    for chain in chains:
+        n_dev = _chain_num_devices(chain, config_dir)
+        n_dev = max(1, min(n_dev, len(gpu_pool)))  # clamp to what's available
+
+        allocated = gpu_pool[:n_dev]
+        # Rotate the pool so the next chain starts after the allocated block.
+        gpu_pool = gpu_pool[n_dev:] + gpu_pool[:n_dev]
+
+        assignments.append((allocated, [r["id"] for r in chain]))
 
     procs = []
-    for gpu, gpu_chains in gpu_assignments.items():
-        if not gpu_chains:
-            continue
-        ids = [rid for chain in gpu_chains for rid in chain]
-        log_file = log_dir / f"gpu{gpu}_runs_{'_'.join(map(str, ids))}.log"
-        logger.info(f"  GPU {gpu}: chains {gpu_chains} → {log_file}")
+    for allocated_gpus, ids in assignments:
+        cuda_str = ",".join(str(g) for g in allocated_gpus)
+        label = f"gpu{'_'.join(str(g) for g in allocated_gpus)}_runs_{'_'.join(map(str, ids))}"
+        log_file = log_dir / f"{label}.log"
+        logger.info(f"  GPUs {allocated_gpus}: runs {ids} → {log_file}")
+
         env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+        env["CUDA_VISIBLE_DEVICES"] = cuda_str
+
+        # Pass --gpus as the single (first) allocated GPU so that the
+        # subprocess single-GPU path sets CUDA_VISIBLE_DEVICES correctly;
+        # actual DDP device count is controlled by num_devices in the model config.
         f = open(log_file, "w")
         proc = subprocess.Popen(
-            [sys.executable, __file__, "--runs", ",".join(map(str, ids)), "--gpus", str(gpu)],
+            [
+                sys.executable, __file__,
+                "--config", str(config_path),
+                "--runs", ",".join(map(str, ids)),
+                "--gpus", str(allocated_gpus[0]),
+            ],
             env=env, stdout=f, stderr=subprocess.STDOUT,
         )
-        procs.append((proc, f, gpu))
+        procs.append((proc, f, allocated_gpus))
 
-    for proc, f, gpu_id in procs:
+    for proc, f, gpus in procs:
         proc.wait()
         f.close()
         if proc.returncode != 0:
-            logger.warning(f"Subprocess for GPU {gpu_id} exited with code {proc.returncode}")
+            logger.warning(f"Subprocess for GPUs {gpus} exited with code {proc.returncode}")
 
     logger.info("All waves complete. Running visualisation...")
     vis_results_dir = Path("src/results") / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -369,21 +425,27 @@ def run_parallel(gpu_ids: List[int], run_ids: Optional[List[int]] = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="conf/experiments.yaml",
+                        help="Path to experiments YAML, e.g. --config conf/experiments_test.yaml")
     parser.add_argument("--runs", type=str, default=None,
                         help="Comma-separated run IDs to execute, e.g. --runs 17,18")
     parser.add_argument("--gpus", type=str, default=None,
-                        help="Comma-separated GPU IDs to use, e.g. --gpus 0,1,2")
+                        help="Comma-separated GPU IDs to use, e.g. --gpus 7,8")
     args = parser.parse_args()
 
+    config_path = Path(args.config)
     run_ids = [int(x) for x in args.runs.split(",")] if args.runs else None
     gpu_ids = [int(x) for x in args.gpus.split(",")] if args.gpus else None
 
     if gpu_ids and len(gpu_ids) > 1:
-        run_parallel(gpu_ids, run_ids)
+        run_parallel(gpu_ids, run_ids, config_path=config_path)
     else:
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
         runner = BenchmarkRunner(test_mode=False, use_cache=True)
-        results_dir = runner.run_experiments(run_ids=run_ids)
+        # Load from the specified config file
+        exp_config = yaml.safe_load(config_path.read_text())
+        runner.factory.config_dir = config_path.parent
+        results_dir = runner.run_experiments(run_ids=run_ids, exp_config=exp_config)
         if run_ids is None:
             runner.visualise(results_dir)

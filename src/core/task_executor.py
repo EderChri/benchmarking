@@ -112,8 +112,8 @@ class TaskExecutor:
         return method(model, splits, model_config)
 
     def _forecast(self, model, splits, model_config):
-        from models.hash_checkpoint_model import HashCheckpointModel
-        if isinstance(model, HashCheckpointModel):
+        from lightning import LightningModule
+        if isinstance(model, LightningModule):
             result = model.forecast(time_stamps=splits.test_data.time_stamps, time_series_prev=splits.test_data)
             return result[0] if isinstance(result, tuple) else result
         if (model_config or {}).get("params", {}).get("rolling_forecast", False):

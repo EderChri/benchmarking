@@ -1,12 +1,11 @@
 import importlib
-from models.classifier_base import config
-from models.model_checkpoint import load_model_if_exists
 import yaml
 from pathlib import Path
 from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class ComponentFactory:
     def __init__(self, config_dir: Path):
@@ -25,7 +24,7 @@ class ComponentFactory:
             "metrics": self._instantiate_metric,
             "models": self._instantiate_model,
             "preprocessing": self._instantiate_preprocessing,
-            "plots": self._instantiate_plot,       
+            "plots": self._instantiate_plot,
         }
         handler = handlers.get(component_type)
         if not handler:
@@ -56,70 +55,80 @@ class ComponentFactory:
         pretrained_model_config: Dict[str, Any] = None,
         save_dir_override: str = None,
     ):
-        module_path = f"merlion.models.{config['module']}" if config.get("source") == "merlion" else config["module"]
+        from lightning import LightningModule
+        from models.model_checkpoint import load_model_if_exists
+
+        is_merlion = config.get("source") == "merlion"
+        module_path = f"merlion.models.{config['module']}" if is_merlion else config["module"]
         module = importlib.import_module(module_path)
         model_cls = getattr(module, config["class"])
-        model_config = getattr(module, config["config_class"])(**config.get("params", {}))
-        from models.hash_checkpoint_model import HashCheckpointModel
+        is_custom = issubclass(model_cls, LightningModule)
 
         save_dir = save_dir_override or f"src/data/.cache/{self.current_cache_key}"
 
+        # --- Dataclass configs (custom models) vs keyword-arg configs (Merlion) ---
+        def make_config(params_dict):
+            config_cls = getattr(module, config["config_class"])
+            from dataclasses import is_dataclass
+            if is_dataclass(config_cls):
+                return config_cls(**params_dict)
+            return config_cls(**params_dict)
+
+        model_config = make_config(config.get("params", {}))
+
+        # --- Transfer learning from a pretrained run ---
         if pretrained_run_id is not None and pretrained_save_dir:
             transferred = None
 
-            if issubclass(model_cls, HashCheckpointModel):
-                import inspect
-
-                extra = {}
-                if "pretrained_config_path" in inspect.signature(model_cls.__init__).parameters:
-                    extra["pretrained_config_path"] = pretrained_config_path
-
-                # Use pretrained run's config to reproduce the correct hash for the saved checkpoint
+            if is_custom:
+                # Build with pretrained config+save_dir so checkpoint_dir resolves correctly.
                 pretrain_params = (pretrained_model_config or config).get("params", {})
-                pretrain_config_obj = getattr(module, config["config_class"])(**pretrain_params)
-                transferred = model_cls(pretrain_config_obj, save_dir=pretrained_save_dir, **extra)
-                if not getattr(transferred, "_checkpoint_loaded", False):
+                pretrain_cfg = make_config(pretrain_params)
+                transferred = model_cls(pretrain_cfg, save_dir=pretrained_save_dir)
+                logger.info(f"Looking for pretrained checkpoint at: {transferred.checkpoint_path}")
+                if not transferred.checkpoint_exists():
                     transferred = None
+                else:
+                    transferred._ensure_ready()
             else:
                 source_config = pretrained_model_config or config
                 transferred = load_model_if_exists(model_cls, pretrained_save_dir, source_config)
 
             if transferred is not None:
-                if hasattr(transferred, "config"):
-                    transferred.config = model_config
-                if hasattr(transferred, "save_dir"):
-                    transferred.save_dir = save_dir
-                if hasattr(transferred, "current_epoch"):
-                    transferred.current_epoch = 0
+                # Swap config and save_dir so the model trains/saves in the new run's location.
+                transferred.config = model_config
+                transferred.save_dir = save_dir
                 logger.info("Loaded transfer model from pretrained run checkpoint")
                 return transferred, False
 
-            logger.warning("Requested pretrained_run but no transferable checkpoint was found; initializing fresh model")
+            logger.warning(
+                "pretrained_run requested but no checkpoint found; initialising fresh model"
+            )
 
-        # Try loading existing checkpoint first (works for ALL models)
-        existing = None
+        # --- Resume existing checkpoint (same run, re-started) ---
         if pretrained_run_id is None:
-            existing = load_model_if_exists(model_cls, save_dir, config)
-            if existing is not None:
-                logger.info("Successfully resumed from existing checkpoint")
-                return existing, True
+            if is_custom:
+                # Instantiate fresh — checkpoint is loaded lazily in _ensure_ready() / _fit_and_restore_best()
+                model = model_cls(model_config, save_dir=save_dir)
+                already_done = model.checkpoint_exists()
+                return model, already_done
+            else:
+                existing = load_model_if_exists(model_cls, save_dir, config)
+                if existing is not None:
+                    logger.info("Successfully resumed from existing checkpoint")
+                    return existing, True
 
-        # Instantiate fresh — inject extra kwargs only for HashCheckpointModel subclasses
-        import inspect
-        if issubclass(model_cls, HashCheckpointModel):
-            extra = {}
-            if "pretrained_config_path" in inspect.signature(model_cls.__init__).parameters:
-                extra["pretrained_config_path"] = pretrained_config_path
-            return model_cls(model_config, save_dir=save_dir, **extra), False
+        # --- Fresh instantiation ---
+        if is_custom:
+            return model_cls(model_config, save_dir=save_dir), False
 
         return model_cls(model_config), False
 
-    
     def _instantiate_plot(self, config: Dict[str, Any]):
         module = importlib.import_module(config["module"])
         cls = getattr(module, config["class"])
         return cls(**config.get("params", {}))
-    
+
     def _instantiate_preprocessing(self, config: Dict[str, Any]):
         module_path = (
             f"merlion.transform.{config['module']}" if config.get("source") == "merlion"

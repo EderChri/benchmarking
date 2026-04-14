@@ -1,0 +1,634 @@
+# conf/experiments_test.yaml
+#
+# Smoke-test suite for the PL migration.
+#
+# Run with:
+#   CUDA_VISIBLE_DEVICES=7,8 python src/core/main.py \
+#       --config conf/experiments_test.yaml --gpus 7,8
+#
+# The parallel dispatcher assigns independent chains round-robin across
+# GPUs 7 and 8.  Each run uses num_devices=1 (one GPU per run).
+# To test DDP within a single run, add num_devices: 2 to the model
+# overrides — the dispatcher will then allocate both GPUs to that chain.
+#
+# IDs start at 900 to avoid collisions with existing index.yaml entries.
+# num_epochs=3, patience=2 everywhere — enough to exercise the full PL
+# loop (training_step, validation_step, EarlyStopping, ModelCheckpoint)
+# without a long wait.
+#
+# What this validates:
+#   - Every model class initialises without error
+#   - Checkpoint is written and found by dependent runs (pretrain→finetune)
+#   - Predictions / forecasts are non-NaN; metrics are in a valid range
+#   - Both GPUs 7 and 8 are exercised via the parallel chain dispatcher
+
+runs:
+
+  # =====================================================================
+  # CHAIN 1 — MultiViewClassifier  (original 3-domain)
+  # Pretrain SleepEEG → finetune + freeze EMG
+  # Dispatcher keeps this chain on one GPU (7 or 8).
+  # =====================================================================
+
+  - id: 900
+    name: "SMOKE MVC pretrain SleepEEG"
+    task: "classification"
+    data: "sleep_eeg"
+    model: "multi_view_classifier"
+    target: 1
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          mode: "pretrain"
+          num_epochs: 200
+          num_target: 5
+          pretrain_validate_on_train: true
+          batch_size: 256
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 5
+
+  - id: 901
+    name: "SMOKE MVC finetune EMG"
+    task: "classification"
+    data: "emg"
+    model: "multi_view_classifier"
+    target: 1
+    pretrained_run: 900
+    skip_training: false
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          mode: "finetune"
+          num_epochs: 100
+          num_target: 3
+          batch_size: 128
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  - id: 902
+    name: "SMOKE MVC freeze EMG"
+    task: "classification"
+    data: "emg"
+    model: "multi_view_classifier"
+    target: 1
+    pretrained_run: 900
+    skip_training: false
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          mode: "freeze"
+          num_epochs: 100
+          num_target: 3
+          batch_size: 128
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  # =====================================================================
+  # CHAIN 2 — MultiViewLogSigClassifier  (N-view, lazy encoder)
+  # Pretrain SleepEEG → finetune + freeze EMG
+  # =====================================================================
+
+  - id: 910
+    name: "SMOKE LogSig pretrain SleepEEG"
+    task: "classification"
+    data: "sleep_eeg"
+    model: "multi_view_log_sig_classifier"
+    target: 1
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          mode: "pretrain"
+          num_epochs: 200
+          num_target: 5
+          views: ["xt", "dx", "xf"]
+          lam: 1.0
+          pretrain_validate_on_train: true
+          batch_size: 256
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 5
+
+  - id: 911
+    name: "SMOKE LogSig finetune EMG"
+    task: "classification"
+    data: "emg"
+    model: "multi_view_log_sig_classifier"
+    target: 1
+    pretrained_run: 910
+    skip_training: false
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          mode: "finetune"
+          num_epochs: 100
+          num_target: 3
+          views: ["xt", "dx", "xf"]
+          lam: 0.0
+          batch_size: 128
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  - id: 912
+    name: "SMOKE LogSig freeze EMG"
+    task: "classification"
+    data: "emg"
+    model: "multi_view_log_sig_classifier"
+    target: 1
+    pretrained_run: 910
+    skip_training: false
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          mode: "freeze"
+          num_epochs: 100
+          num_target: 3
+          views: ["xt", "dx", "xf"]
+          lam: 0.0
+          batch_size: 128
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  # =====================================================================
+  # STANDALONE — RawClassifier (raw and multi_view modes)
+  # Independent runs; each gets its own GPU slot.
+  # =====================================================================
+
+  - id: 920
+    name: "SMOKE RawClassifier raw EMG"
+    task: "classification"
+    data: "emg"
+    model: "raw_classifier"
+    target: 1
+    skip_training: false
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          input_mode: "raw"
+          num_feature: 1
+          num_target: 3
+          num_epochs: 200
+          batch_size: 128
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  - id: 921
+    name: "SMOKE RawClassifier multi_view EMG"
+    task: "classification"
+    data: "emg"
+    model: "raw_classifier"
+    target: 1
+    skip_training: false
+    preprocessor: "multi_view_contrastive"
+    metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+    overrides:
+      model:
+        params:
+          input_mode: "multi_view"
+          num_feature: 1
+          num_target: 3
+          num_epochs: 200
+          batch_size: 128
+      metrics:
+        auroc_auprc:
+          params:
+            num_classes: 3
+
+  # # =====================================================================
+  # # CHAINS 3-6 — MultiViewLogSigClassifier view ablation
+  # # Four view combinations, each chain: pretrain SleepEEG → finetune EMG
+  # # IDs 950-957
+  # # =====================================================================
+
+  # # --- Chain 3: xt + logsig ---
+
+  # - id: 950
+  #   name: "LogSig [xt,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 951
+  #   name: "LogSig [xt,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 950
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # --- Chain 4: xt + dx + logsig ---
+
+  # - id: 952
+  #   name: "LogSig [xt,dx,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "dx", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 953
+  #   name: "LogSig [xt,dx,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 952
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "dx", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # --- Chain 5: xt + xf + logsig ---
+
+  # - id: 954
+  #   name: "LogSig [xt,xf,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "xf", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 955
+  #   name: "LogSig [xt,xf,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 954
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "xf", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # --- Chain 6: xt + dx + xf + logsig ---
+
+  # - id: 956
+  #   name: "LogSig [xt,dx,xf,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "dx", "xf", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 957
+  #   name: "LogSig [xt,dx,xf,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 956
+  #   preprocessor: "log_sig_windowed_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "dx", "xf", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # =====================================================================
+  # # CHAINS 7-10 — same view ablation with time-augmented logsig
+  # # Preprocessor: log_sig_time_aug_samplewise
+  # # (logsig_dim is larger: path_dim=num_feature+1 → more Lie-bracket terms)
+  # # IDs 958-965
+  # # =====================================================================
+
+  # # --- Chain 7: xt + logsig (time aug) ---
+
+  # - id: 958
+  #   name: "LogSig-TA [xt,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 959
+  #   name: "LogSig-TA [xt,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 958
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # --- Chain 8: xt + dx + logsig (time aug) ---
+
+  # - id: 960
+  #   name: "LogSig-TA [xt,dx,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "dx", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 961
+  #   name: "LogSig-TA [xt,dx,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 960
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "dx", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # --- Chain 9: xt + xf + logsig (time aug) ---
+
+  # - id: 962
+  #   name: "LogSig-TA [xt,xf,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "xf", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 963
+  #   name: "LogSig-TA [xt,xf,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 962
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "xf", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3
+
+  # # --- Chain 10: xt + dx + xf + logsig (time aug) ---
+
+  # - id: 964
+  #   name: "LogSig-TA [xt,dx,xf,log] pretrain SleepEEG"
+  #   task: "classification"
+  #   data: "sleep_eeg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "pretrain"
+  #         views: ["xt", "dx", "xf", "logsig"]
+  #         num_target: 5
+  #         lam: 1.0
+  #         pretrain_validate_on_train: true
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 256
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 5
+
+  # - id: 965
+  #   name: "LogSig-TA [xt,dx,xf,log] finetune EMG"
+  #   task: "classification"
+  #   data: "emg"
+  #   model: "multi_view_log_sig_classifier"
+  #   target: 1
+  #   pretrained_run: 964
+  #   preprocessor: "log_sig_time_aug_samplewise"
+  #   metrics: ["precision", "recall", "f1", "accuracy", "auroc_auprc"]
+  #   overrides:
+  #     model:
+  #       params:
+  #         mode: "finetune"
+  #         views: ["xt", "dx", "xf", "logsig"]
+  #         num_target: 3
+  #         lam: 0.0
+  #         num_epochs: 3
+  #         patience: 2
+  #         batch_size: 128
+  #     metrics:
+  #       auroc_auprc:
+  #         params:
+  #           num_classes: 3

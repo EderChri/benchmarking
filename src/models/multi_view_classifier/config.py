@@ -1,96 +1,39 @@
+from dataclasses import dataclass
 from typing import Optional
-import torch.nn as nn
-from merlion.models.anomaly.base import DetectorConfig
-import numpy as np
-import pandas as pd
+
+from models.base import BaseModelConfig
 
 
-class MultiViewClassifierConfig(DetectorConfig):
-    """Configuration for Multi-View Transformer Classifier."""
-    
-    def __init__(
-        self,
-        # Model architecture
-        num_feature: int = 1,
-        num_embedding: int = 128,
-        num_hidden: int = 256,
-        num_head: int = 8,
-        num_layers: int = 2,
-        num_target: int = 2,
-        dropout: float = 0.1,
-        
-        # Training parameters
-        batch_size: int = 32,
-        num_epochs: int = 10,
-        lr: float = 0.001,
-        weight_decay: float = 0.01,
-        patience: int = 20,
-        l1_scale: float = 0.0,
-        l2_scale: float = 0.01,
-        
-        # Loss configuration
-        loss_type: str = 'ALL',
-        feature: str = 'latent',
-        temperature: float = 0.5,
-        lam: float = 0.1,
-        
-        # Training mode
-        mode: str = 'finetune',
+@dataclass
+class MultiViewClassifierConfig(BaseModelConfig):
+    # Architecture
+    num_feature: int = 1
+    num_embedding: int = 128
+    num_hidden: int = 256
+    num_head: int = 8
+    num_layers: int = 2
+    num_target: int = 2
+    dropout: float = 0.1
 
-        # Training behavior controls
-        pretrain_validate_on_train: bool = False,
-        finetune_monitor_metric: str = 'loss',
-        
-        # Data augmentation
-        augmentation_strength: float = 0.1,
-        
-        # Device
-        use_gpu: bool = True,
-        
-        # Pre-trained weights
-        checkpoint_path: Optional[str] = None,
-        
-        # DetectorConfig parameters
-        max_score: float = 1.0,
-        threshold=None,
-        enable_calibrator: bool = True,
-        enable_threshold: bool = True,
-        transform=None,
-        **kwargs
-    ):
-        self.num_feature = num_feature
-        self.num_embedding = num_embedding
-        self.num_hidden = num_hidden
-        self.num_head = num_head
-        self.num_layers = num_layers
-        self.num_target = num_target
-        self.dropout = dropout
-        
-        self.batch_size = batch_size
-        self.num_epochs = num_epochs
-        self.patience = patience
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.l1_scale = l1_scale
-        self.l2_scale = l2_scale
-        
-        self.loss_type = loss_type
-        self.feature = feature
-        self.temperature = temperature
-        self.lam = lam
-        
-        self.mode = mode
-        self.pretrain_validate_on_train = pretrain_validate_on_train
-        self.finetune_monitor_metric = finetune_monitor_metric
-        self.augmentation_strength = augmentation_strength
-        self.use_gpu = use_gpu
-        self.checkpoint_path = checkpoint_path
-        
-        super().__init__(
-            max_score=max_score,
-            threshold=threshold,
-            enable_calibrator=enable_calibrator,
-            enable_threshold=enable_threshold,
-            transform=transform,
-            **kwargs
-        )
+    # Contrastive loss
+    loss_type: str = "ALL"
+    feature: str = "latent"
+    temperature: float = 0.5
+    lam: float = 0.1
+    l1_scale: float = 0.0
+    l2_scale: float = 0.01
+
+    # Training mode
+    mode: str = "finetune"           # "pretrain" | "finetune" | "freeze"
+    pretrain_validate_on_train: bool = False
+    augmentation_strength: float = 0.1
+
+    # For loading pretrained encoder weights from an external file
+    checkpoint_path: Optional[str] = None
+
+    # Index of the target sequence column (used by _extract_domains_matrix).
+    # Set automatically by the factory from run.target.
+    target_seq_index: int = 1
+
+    # Kept for YAML backward-compatibility (used by task_executor rolling forecast)
+    max_forecast_steps: Optional[int] = None
